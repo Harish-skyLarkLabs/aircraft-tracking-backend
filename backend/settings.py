@@ -164,24 +164,23 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
 # ML Models Configuration
+# Aircraft.pt - Custom YOLO model from ML team
 ML_MODELS = {
-    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'models', 'aircraft_detection.pt'),
+    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'Aircraft.pt'),
 }
 
-# Aircraft Detection Settings
+# Aircraft Detection Settings (matching inference.py)
 AIRCRAFT_DETECTION_SETTINGS = {
     'MAX_FPS': 15,
     'FRAME_BUFFER_SIZE': 3,
     'DEBUG_VISUALIZATION': True,
-    'CONFIDENCE_THRESHOLD': 0.5,
-    'IOU_THRESHOLD': 0.45,
+    'CONFIDENCE_THRESHOLD': 0.25,  # From inference.py
+    'IOU_THRESHOLD': 0.45,         # From inference.py
 }
 
-# Detection Classes for Aircraft
+# Detection Classes for Aircraft (from Aircraft.pt model)
 AIRCRAFT_CLASSES = {
-    0: 'aircraft',
-    1: 'helicopter',
-    2: 'drone',
+    0: 'Aircraft',
 }
 
 # Alert Types
@@ -203,6 +202,6 @@ MINIO_BUCKET_NAME = os.getenv('MINIO_BUCKET_NAME', 'aircraft-tracking')
 # MinIO public URL for frontend access (without /bucket-name)
 MINIO_PUBLIC_URL = os.getenv('MINIO_PUBLIC_URL', f'http://{MINIO_ENDPOINT}')
 
-# Backend public URL for MJPEG streaming
+# Backend public URL for WebSocket streaming
 BACKEND_PUBLIC_URL = os.getenv('BACKEND_PUBLIC_URL', 'http://localhost:8000')
 

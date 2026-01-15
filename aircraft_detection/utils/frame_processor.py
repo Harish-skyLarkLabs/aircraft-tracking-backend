@@ -1,22 +1,18 @@
 """
-Frame processor for aircraft detection and tracking
+Frame processor for aircraft detection with tracking and session-based recording
 """
-import cv2
 import numpy as np
 import threading
 import queue
 import time
 import logging
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable, Set
 from datetime import datetime
 
 from .aircraft_detector import get_detector
 from .tracker import IOUTracker
-from .drawing_utils import (
-    draw_aircraft_detection,
-    draw_polygon_roi,
-    draw_info_overlay,
-)
+from .video_recorder import get_video_recorder
+from .drawing_utils import draw_polygon_roi
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +49,21 @@ class FrameBuffer:
 
 
 class FrameProcessor:
-    """Process frames for aircraft detection and tracking"""
+    """
+    Process frames for aircraft detection with:
+    - Object tracking (IOU-based)
+    - Session-based recording (one alert per track with image + video)
+    """
     
     def __init__(
         self,
         camera_id: str,
         camera_name: str = "",
         roi_points: Optional[List[List[int]]] = None,
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.25,
         max_fps: int = 15,
         debug_visualization: bool = True,
+        enable_recording: bool = True,
     ):
         self.camera_id = camera_id
         self.camera_name = camera_name
@@ -70,10 +71,16 @@ class FrameProcessor:
         self.confidence_threshold = confidence_threshold
         self.max_fps = max_fps
         self.debug_visualization = debug_visualization
+        self.enable_recording = enable_recording
         
-        # Initialize detector and tracker
+        # Initialize detector
         self.detector = get_detector(confidence_threshold=confidence_threshold)
-        self.tracker = IOUTracker(iou_threshold=0.3, max_age=30, min_hits=3)
+        
+        # Initialize tracker
+        self.tracker = IOUTracker(iou_threshold=0.3, max_age=30, min_hits=2)
+        
+        # Video recorder (handles recording + alert creation)
+        self.video_recorder = get_video_recorder() if enable_recording else None
         
         # Frame buffer
         self.frame_buffer = FrameBuffer(size=5)
@@ -84,8 +91,8 @@ class FrameProcessor:
         self.last_process_time = 0
         self.fps = 0
         
-        # Detection history for action determination
-        self.detection_history: Dict[int, List[Dict]] = {}
+        # Track current active tracks
+        self.current_track_ids: Set[int] = set()
         
         # Callbacks
         self.detection_callback: Optional[Callable] = None
@@ -99,32 +106,34 @@ class FrameProcessor:
         self.processing_thread = threading.Thread(target=self._processing_worker, daemon=True)
         self.processing_thread.start()
         
-        logger.info(f"FrameProcessor initialized for camera {camera_id}")
+        logger.info(f"FrameProcessor initialized for camera {camera_id} (recording={enable_recording})")
     
     def _processing_worker(self):
         """Background worker thread for frame processing"""
         while self.processing_active:
             try:
-                # Get frame from queue
                 try:
                     frame = self.frame_queue.get(timeout=0.2)
                 except queue.Empty:
+                    # Check for completed recordings periodically
+                    if self.video_recorder:
+                        self.video_recorder.check_and_complete_recordings(
+                            self.camera_id, 
+                            self.current_track_ids
+                        )
                     continue
                 
                 if self.processing_enabled:
-                    # Process the frame
                     start_time = time.time()
                     processed_frame, detections = self._process_frame_sync(frame)
                     process_time = time.time() - start_time
                     
-                    # Calculate FPS
                     if process_time > 0:
                         self.fps = 1.0 / process_time
                     
                     self.last_process_time = process_time
                     self.result_queue.put((processed_frame, detections))
                 else:
-                    # Return original frame
                     self.result_queue.put((frame.copy(), []))
                 
                 self.frame_queue.task_done()
@@ -135,11 +144,16 @@ class FrameProcessor:
     def _process_frame_sync(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict]]:
         """Process a single frame synchronously"""
         self.frame_counter += 1
-        processed_frame = frame.copy()
+        original_frame = frame.copy()
         
         try:
-            # Run detection
-            raw_detections = self.detector.detect(frame, self.roi_points)
+            # Add frame to video recorder buffer (for pre-roll)
+            if self.video_recorder:
+                self.video_recorder.add_frame_to_buffer(self.camera_id, original_frame)
+            
+            # Run detection and get annotated frame
+            annotated_frame, raw_detections = self.detector.detect_and_plot(frame, self.roi_points)
+            processed_frame = annotated_frame
             
             # Prepare detections for tracker
             bboxes = [d['bbox'] for d in raw_detections]
@@ -148,13 +162,16 @@ class FrameProcessor:
             # Update tracker
             tracked_objects = self.tracker.update(bboxes, class_ids)
             
-            # Build detection results with tracking info
+            # Build detection results and update current track IDs
             detections = []
+            new_track_ids: Set[int] = set()
             
             for track_id, bbox in tracked_objects:
+                new_track_ids.add(track_id)
+                
                 # Find matching raw detection for confidence
                 confidence = 0.0
-                class_name = 'aircraft'
+                class_name = 'Aircraft'
                 class_id = 0
                 
                 for raw_det in raw_detections:
@@ -164,66 +181,41 @@ class FrameProcessor:
                         class_id = raw_det['class_id']
                         break
                 
-                # Get track direction and determine action
-                direction = self.tracker.get_track_direction(track_id)
-                track = self.tracker.get_track(track_id)
-                velocity = track.get_velocity() if track else None
-                
-                # Determine position in frame
-                frame_height = frame.shape[0]
-                bbox_center_y = (bbox[1] + bbox[3]) / 2
-                if bbox_center_y < frame_height * 0.33:
-                    position = 'top'
-                elif bbox_center_y > frame_height * 0.66:
-                    position = 'bottom'
-                else:
-                    position = 'middle'
-                
-                action = self.detector.determine_action(direction, position, velocity)
-                
                 detection = {
                     'track_id': track_id,
                     'bbox': bbox,
                     'confidence': confidence,
                     'class_id': class_id,
                     'class_name': class_name,
-                    'action': action,
-                    'direction': direction,
                     'timestamp': datetime.now().isoformat(),
                 }
-                
                 detections.append(detection)
                 
-                # Draw on frame if debug visualization is enabled
-                if self.debug_visualization:
-                    processed_frame = draw_aircraft_detection(
-                        processed_frame,
-                        bbox,
-                        detection_type=class_name,
-                        action=action,
+                # Start or update recording session for this track
+                if self.video_recorder:
+                    self.video_recorder.start_or_update_recording(
+                        camera_id=self.camera_id,
                         track_id=track_id,
+                        detection_type=class_name,
                         confidence=confidence,
+                        bbox=bbox,
+                        frame=original_frame,
+                        action='unknown',  # Could be determined from tracker direction
                     )
-                
-                # Call detection callback if set
-                if self.detection_callback and action in ['landing', 'takeoff']:
-                    try:
-                        self.detection_callback(detection)
-                    except Exception as e:
-                        logger.error(f"Error in detection callback: {e}")
+            
+            # Update current track IDs
+            self.current_track_ids = new_track_ids
+            
+            # Check for completed recordings (tracks that disappeared)
+            if self.video_recorder:
+                self.video_recorder.check_and_complete_recordings(
+                    self.camera_id,
+                    self.current_track_ids
+                )
             
             # Draw ROI if defined
             if self.debug_visualization and self.roi_points:
                 processed_frame = draw_polygon_roi(processed_frame, self.roi_points)
-            
-            # Draw info overlay
-            if self.debug_visualization:
-                processed_frame = draw_info_overlay(
-                    processed_frame,
-                    fps=self.fps,
-                    detection_count=len(detections),
-                    camera_name=self.camera_name,
-                )
             
             # Store in buffer
             self.frame_buffer.add(processed_frame, detections)
@@ -259,15 +251,12 @@ class FrameProcessor:
             self.frame_buffer.add(frame.copy(), [])
             return frame.copy(), []
         
-        # Check if we're falling behind
         if self.frame_queue.qsize() >= 2:
             return self.frame_buffer.get_latest()
         
         try:
-            # Queue the frame
             self.frame_queue.put(frame, timeout=0.1)
             
-            # Wait for result
             try:
                 processed_frame, detections = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
@@ -294,25 +283,35 @@ class FrameProcessor:
     
     def get_stats(self) -> Dict:
         """Get processing statistics"""
-        return {
+        stats = {
             'camera_id': self.camera_id,
             'frame_counter': self.frame_counter,
             'fps': round(self.fps, 1),
             'processing_enabled': self.processing_enabled,
             'queue_size': self.frame_queue.qsize(),
-            'active_tracks': len(self.tracker.tracks),
+            'active_tracks': len(self.current_track_ids),
         }
+        
+        if self.video_recorder:
+            stats['video_recorder'] = self.video_recorder.get_stats()
+        
+        return stats
     
     def cleanup(self):
         """Clean up resources"""
         self.processing_active = False
+        
         if self.processing_thread.is_alive():
             self.processing_thread.join(timeout=1.0)
+        
+        # Clean up tracking data
         self.tracker.clear()
+        
+        # Clean up video recorder data for this camera
+        if self.video_recorder:
+            self.video_recorder.cleanup_camera(self.camera_id)
+        
         logger.info(f"FrameProcessor cleaned up for camera {self.camera_id}")
     
     def __del__(self):
         self.cleanup()
-
-
-

@@ -17,7 +17,7 @@ class AircraftDetectionSerializer(serializers.ModelSerializer):
             'detection_id', 'track_id', 'detection_type', 'action', 'confidence',
             'aircraft_type', 'aircraft_registration', 'flight_number', 'airline', 'runway',
             'speed', 'altitude', 'heading',
-            'severity', 'status', 'title', 'description',
+            'severity', 'status', 'is_read', 'title', 'description',
             'camera_id', 'camera_name',
             'image_path', 'image_url', 'video_path', 'video_url',
             'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'bbox',
@@ -40,18 +40,24 @@ class AircraftDetectionSerializer(serializers.ModelSerializer):
 class AircraftDetectionListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views"""
     image_url = serializers.SerializerMethodField()
+    video_url = serializers.SerializerMethodField()
 
     class Meta:
         model = AircraftDetection
         fields = [
             'detection_id', 'detection_type', 'action', 'confidence',
-            'title', 'severity', 'status', 'camera_id', 'camera_name',
-            'detection_time', 'image_path', 'image_url', 'flight_number', 'aircraft_type'
+            'title', 'severity', 'status', 'is_read', 'camera_id', 'camera_name',
+            'detection_time', 'image_path', 'image_url', 'video_path', 'video_url',
+            'flight_number', 'aircraft_type'
         ]
 
     def get_image_url(self, obj) -> str | None:
         """Get the full MinIO URL for the detection image."""
         return obj.image_url
+
+    def get_video_url(self, obj) -> str | None:
+        """Get the full MinIO URL for the detection video."""
+        return obj.video_url
 
 
 class AircraftDetectionCreateSerializer(serializers.ModelSerializer):

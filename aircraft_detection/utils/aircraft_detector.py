@@ -1,5 +1,6 @@
 """
-Aircraft Detection using YOLO model
+Aircraft Detection using YOLO model (Aircraft.pt)
+Custom model trained for aircraft detection
 """
 import cv2
 import numpy as np
@@ -7,74 +8,84 @@ import torch
 import logging
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# Default model path - Aircraft.pt from ML team
+DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'Aircraft.pt'
+
+# Detection thresholds matching inference.py
+CONFIDENCE_THRESHOLD = 0.25
+IOU_THRESHOLD = 0.45
+
 
 class AircraftDetector:
-    """YOLO-based aircraft detector"""
-    
-    # Class names for aircraft detection
-    CLASS_NAMES = {
-        0: 'aircraft',
-        1: 'helicopter',
-        2: 'drone',
-    }
+    """YOLO-based aircraft detector using custom Aircraft.pt model"""
     
     def __init__(
         self,
         model_path: Optional[str] = None,
-        confidence_threshold: float = 0.5,
-        iou_threshold: float = 0.45,
+        confidence_threshold: float = CONFIDENCE_THRESHOLD,
+        iou_threshold: float = IOU_THRESHOLD,
         device: str = 'auto',
     ):
         """
         Initialize the aircraft detector
         
         Args:
-            model_path: Path to the YOLO model weights
-            confidence_threshold: Minimum confidence for detections
-            iou_threshold: IOU threshold for NMS
+            model_path: Path to the YOLO model weights (defaults to Aircraft.pt)
+            confidence_threshold: Minimum confidence for detections (default: 0.25)
+            iou_threshold: IOU threshold for NMS (default: 0.45)
             device: Device to run inference on ('auto', 'cuda', 'cpu')
         """
         self.confidence_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
         self.model = None
         self.device = self._get_device(device)
+        self.class_names = {}  # Will be populated from model
         
-        if model_path and Path(model_path).exists():
+        # Use provided path or default to Aircraft.pt
+        if model_path is None:
+            model_path = str(DEFAULT_MODEL_PATH)
+        
+        if Path(model_path).exists():
             self.load_model(model_path)
         else:
-            logger.warning(f"Model path not found: {model_path}. Using default YOLO model.")
-            self._load_default_model()
+            logger.error(f"Model not found at {model_path}")
+            # Try default location
+            if DEFAULT_MODEL_PATH.exists():
+                self.load_model(str(DEFAULT_MODEL_PATH))
+            else:
+                logger.error("Aircraft.pt model not found. Please ensure the model file exists.")
     
     def _get_device(self, device: str) -> str:
         """Determine the device to use"""
         if device == 'auto':
-            return 'cuda' if torch.cuda.is_available() else 'cpu'
+            if torch.cuda.is_available():
+                logger.info("CUDA available - using GPU")
+                return 'cuda'
+            else:
+                logger.info("CUDA not available - using CPU")
+                return 'cpu'
         return device
     
     def load_model(self, model_path: str):
-        """Load a YOLO model from path"""
+        """Load the YOLO model from path"""
         try:
             from ultralytics import YOLO
+            
+            logger.info(f"Loading Aircraft detection model from {model_path}...")
             self.model = YOLO(model_path)
             self.model.to(self.device)
-            logger.info(f"Loaded aircraft detection model from {model_path}")
+            
+            # Get class names from model
+            self.class_names = self.model.names
+            logger.info(f"Model loaded successfully! Classes: {self.class_names}")
+            logger.info(f"Running on device: {self.device}")
+            
         except Exception as e:
             logger.error(f"Error loading model: {e}")
-            self._load_default_model()
-    
-    def _load_default_model(self):
-        """Load default YOLO model for general object detection"""
-        try:
-            from ultralytics import YOLO
-            # Use YOLOv8n as default - can detect airplanes from COCO classes
-            self.model = YOLO('yolov8n.pt')
-            self.model.to(self.device)
-            logger.info("Loaded default YOLOv8n model")
-        except Exception as e:
-            logger.error(f"Error loading default model: {e}")
             self.model = None
     
     def detect(
@@ -100,7 +111,7 @@ class AircraftDetector:
             return []
         
         try:
-            # Run inference
+            # Run inference with same parameters as inference.py
             results = self.model(
                 frame,
                 conf=self.confidence_threshold,
@@ -119,17 +130,8 @@ class AircraftDetector:
                     confidence = float(box.conf[0])
                     class_id = int(box.cls[0])
                     
-                    # Map class ID to aircraft types
-                    # COCO class 4 is 'airplane', we'll treat it as 'aircraft'
-                    # For custom models, use the CLASS_NAMES mapping
-                    if class_id == 4:  # COCO airplane class
-                        class_name = 'aircraft'
-                        class_id = 0
-                    elif class_id in self.CLASS_NAMES:
-                        class_name = self.CLASS_NAMES[class_id]
-                    else:
-                        # Skip non-aircraft detections for default model
-                        continue
+                    # Get class name from model's class names
+                    class_name = self.class_names.get(class_id, 'unknown')
                     
                     bbox = [int(x1), int(y1), int(x2), int(y2)]
                     
@@ -149,6 +151,73 @@ class AircraftDetector:
         except Exception as e:
             logger.error(f"Error during detection: {e}")
             return []
+    
+    def detect_and_plot(
+        self,
+        frame: np.ndarray,
+        roi_points: Optional[List[List[int]]] = None,
+    ) -> Tuple[np.ndarray, List[Dict]]:
+        """
+        Detect aircraft and return annotated frame (like inference.py)
+        
+        Args:
+            frame: Input frame (BGR format)
+            roi_points: Optional ROI polygon to filter detections
+            
+        Returns:
+            Tuple of (annotated_frame, detections_list)
+        """
+        if self.model is None:
+            return frame, []
+        
+        try:
+            # Run inference
+            results = self.model(
+                frame,
+                conf=self.confidence_threshold,
+                iou=self.iou_threshold,
+                verbose=False,
+            )
+            
+            detections = []
+            annotated_frame = frame.copy()
+            
+            for result in results:
+                # Get annotated frame using ultralytics plot method
+                # Same as inference.py
+                annotated_frame = result.plot(
+                    conf=True,      # Show confidence scores
+                    labels=True,    # Show class labels
+                    boxes=True,     # Show bounding boxes
+                    line_width=2    # Box line width
+                )
+                
+                boxes = result.boxes
+                
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = float(box.conf[0])
+                    class_id = int(box.cls[0])
+                    class_name = self.class_names.get(class_id, 'unknown')
+                    
+                    bbox = [int(x1), int(y1), int(x2), int(y2)]
+                    
+                    # Check if detection is within ROI
+                    if roi_points and not self._is_in_roi(bbox, roi_points):
+                        continue
+                    
+                    detections.append({
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'class_id': class_id,
+                        'class_name': class_name,
+                    })
+            
+            return annotated_frame, detections
+            
+        except Exception as e:
+            logger.error(f"Error during detection: {e}")
+            return frame, []
     
     def _is_in_roi(self, bbox: List[int], roi_points: List[List[int]]) -> bool:
         """Check if bbox center is within ROI polygon"""
@@ -211,6 +280,7 @@ class AircraftDetector:
         return {
             'status': 'loaded',
             'device': self.device,
+            'class_names': self.class_names,
             'confidence_threshold': self.confidence_threshold,
             'iou_threshold': self.iou_threshold,
         }
@@ -222,8 +292,8 @@ _detector_instance: Optional[AircraftDetector] = None
 
 def get_detector(
     model_path: Optional[str] = None,
-    confidence_threshold: float = 0.5,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = CONFIDENCE_THRESHOLD,
+    iou_threshold: float = IOU_THRESHOLD,
 ) -> AircraftDetector:
     """Get or create the global detector instance"""
     global _detector_instance
@@ -236,4 +306,3 @@ def get_detector(
         )
     
     return _detector_instance
-

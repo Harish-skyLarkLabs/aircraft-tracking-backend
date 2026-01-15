@@ -315,7 +315,7 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
                                     'severity': det.severity,
                                     'camera_id': det.camera_id,
                                     'detection_time': det.detection_time.isoformat(),
-                                    'image_url': det.image.url if det.image else None,
+                                    'image_url': det.image_url,
                                 })
                                 new_ids.add(det_id)
                         
@@ -394,7 +394,7 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
                             'title': d.title,
                             'severity': d.severity,
                             'detection_time': d.detection_time.isoformat(),
-                            'image_url': d.image.url if d.image else None,
+                            'image_url': d.image_url,
                         } for d in detections]
                     
                     detections = await get_detections()
@@ -424,11 +424,20 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
 
 
 class AlertsConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for real-time alerts"""
+    """
+    WebSocket consumer for real-time alerts.
+    
+    Receives alerts from:
+    1. AlertService broadcast via channel layer (real-time)
+    2. Periodic database polling (backup)
+    
+    Group name: "alerts"
+    """
     
     async def connect(self):
         """Handle WebSocket connection"""
-        await self.channel_layer.group_add("aircraft_alerts", self.channel_name)
+        # Join the alerts group for real-time broadcasts
+        await self.channel_layer.group_add("alerts", self.channel_name)
         await self.accept()
         
         self.is_connected = True
@@ -437,6 +446,7 @@ class AlertsConsumer(AsyncWebsocketConsumer):
         
         logger.info(f"Alerts WebSocket connected: client {self.client_id}")
         
+        # Send connection confirmation
         await self.send(text_data=json.dumps({
             "type": "connection_status",
             "status": "connected",
@@ -444,152 +454,186 @@ class AlertsConsumer(AsyncWebsocketConsumer):
             "timestamp": time.time()
         }, cls=UUIDEncoder))
         
-        # Start alert checking task
-        self.check_alerts_task = asyncio.create_task(self.check_alerts())
+        # Send recent alerts on connect
+        await self._send_recent_alerts()
     
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection"""
-        await self.channel_layer.group_discard("aircraft_alerts", self.channel_name)
-        
-        if hasattr(self, 'check_alerts_task'):
-            self.check_alerts_task.cancel()
-            try:
-                await self.check_alerts_task
-            except asyncio.CancelledError:
-                pass
-        
+        await self.channel_layer.group_discard("alerts", self.channel_name)
         self.is_connected = False
         logger.info(f"Alerts WebSocket disconnected: client {self.client_id}")
     
-    async def check_alerts(self):
-        """Periodically check for new alerts"""
+    async def alert_message(self, event):
+        """
+        Handle alert broadcast from AlertService.
+        This is called when AlertService broadcasts a new alert.
+        """
         try:
-            while self.is_connected:
-                try:
-                    @sync_to_async
-                    def get_new_alerts():
-                        from aircraft_detection.models import AircraftDetection
-                        
-                        alerts = AircraftDetection.objects.filter(
-                            status='pending'
-                        ).exclude(
-                            severity='low'
-                        ).order_by('-detection_time')[:20]
-                        
-                        new_alerts = []
-                        new_ids = set()
-                        
-                        for alert in alerts:
-                            alert_id = str(alert.detection_id)
-                            if alert_id not in self.last_seen_alerts:
-                                new_alerts.append({
-                                    'id': alert_id,
-                                    'detection_type': alert.detection_type,
-                                    'action': alert.action,
-                                    'confidence': alert.confidence,
-                                    'title': alert.title,
-                                    'description': alert.description,
-                                    'severity': alert.severity,
-                                    'status': alert.status,
-                                    'camera_id': alert.camera_id,
-                                    'camera_name': alert.camera_name,
-                                    'detection_time': alert.detection_time.isoformat(),
-                                    'image_url': alert.image.url if alert.image else None,
-                                    'flight_number': alert.flight_number,
-                                    'aircraft_type': alert.aircraft_type,
-                                })
-                                new_ids.add(alert_id)
-                        
-                        return new_alerts, new_ids
-                    
-                    new_alerts, new_ids = await get_new_alerts()
-                    self.last_seen_alerts.update(new_ids)
-                    
-                    if new_alerts:
-                        await self.send(text_data=json.dumps({
-                            'type': 'new_alerts',
-                            'alerts': new_alerts,
-                            'timestamp': time.time()
-                        }, cls=UUIDEncoder))
-                    
-                    # Limit set size
-                    if len(self.last_seen_alerts) > 200:
-                        self.last_seen_alerts = set(list(self.last_seen_alerts)[-200:])
-                    
-                    await asyncio.sleep(2.0)
-                    
-                except Exception as e:
-                    logger.error(f"Error checking alerts: {e}")
-                    await asyncio.sleep(5.0)
-        
-        except asyncio.CancelledError:
-            logger.info(f"Alert check task cancelled for client {self.client_id}")
+            event_type = event.get('event', 'new_alert')
+            data = event.get('data', {})
+            data = convert_to_serializable(data)
+            
+            await self.send(text_data=json.dumps({
+                'type': event_type,
+                'data': data,
+                'timestamp': time.time()
+            }, cls=UUIDEncoder))
+            
+            logger.debug(f"Sent {event_type} to client {self.client_id}")
+            
+        except Exception as e:
+            logger.error(f"Error sending alert message: {e}")
     
-    async def send_alert(self, event):
-        """Send alert to client (called from channel layer)"""
-        alert = event.get('alert', {})
-        alert = convert_to_serializable(alert)
-        
-        await self.send(text_data=json.dumps({
-            'type': 'alert',
-            'alert': alert,
-            'timestamp': time.time()
-        }, cls=UUIDEncoder))
+    async def _send_recent_alerts(self):
+        """Send recent alerts to newly connected client"""
+        try:
+            @sync_to_async
+            def get_recent_alerts():
+                from aircraft_detection.models import AircraftDetection
+                
+                alerts = AircraftDetection.objects.filter(
+                    is_read=False
+                ).order_by('-detection_time')[:20]
+                
+                return [{
+                    'id': str(a.detection_id),
+                    'detection_type': a.detection_type,
+                    'confidence': a.confidence,
+                    'title': a.title,
+                    'description': a.description,
+                    'severity': a.severity,
+                    'is_read': a.is_read,
+                    'camera_id': a.camera_id,
+                    'camera_name': a.camera_name,
+                    'image_url': a.image_url,
+                    'video_url': a.video_url,
+                    'timestamp': a.detection_time.isoformat(),
+                } for a in alerts]
+            
+            alerts = await get_recent_alerts()
+            
+            await self.send(text_data=json.dumps({
+                'type': 'initial_alerts',
+                'data': alerts,
+                'count': len(alerts),
+                'timestamp': time.time()
+            }, cls=UUIDEncoder))
+            
+        except Exception as e:
+            logger.error(f"Error sending recent alerts: {e}")
     
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
         try:
             data = json.loads(text_data)
+            command = data.get('command')
             
-            if 'command' in data:
-                command = data['command']
+            if command == 'get_alerts':
+                # Get alerts with optional filters
+                count = int(data.get('count', 20))
+                camera_id = data.get('camera_id')
+                unread_only = data.get('unread_only', True)
                 
-                if command == 'get_alerts':
-                    count = int(data.get('count', 20))
-                    camera_id = data.get('camera_id')
+                @sync_to_async
+                def get_alerts():
+                    from aircraft_detection.models import AircraftDetection
                     
+                    queryset = AircraftDetection.objects.all()
+                    
+                    if unread_only:
+                        queryset = queryset.filter(is_read=False)
+                    
+                    if camera_id:
+                        queryset = queryset.filter(camera_id=camera_id)
+                    
+                    alerts = queryset.order_by('-detection_time')[:count]
+                    
+                    return [{
+                        'id': str(a.detection_id),
+                        'detection_type': a.detection_type,
+                        'confidence': a.confidence,
+                        'title': a.title,
+                        'description': a.description,
+                        'severity': a.severity,
+                        'is_read': a.is_read,
+                        'camera_id': a.camera_id,
+                        'camera_name': a.camera_name,
+                        'image_url': a.image_url,
+                        'video_url': a.video_url,
+                        'timestamp': a.detection_time.isoformat(),
+                    } for a in alerts]
+                
+                alerts = await get_alerts()
+                
+                await self.send(text_data=json.dumps({
+                    'type': 'alerts',
+                    'data': alerts,
+                    'count': len(alerts),
+                    'timestamp': time.time()
+                }, cls=UUIDEncoder))
+            
+            elif command == 'mark_read':
+                # Mark alert as read
+                alert_id = data.get('alert_id')
+                
+                if alert_id:
                     @sync_to_async
-                    def get_alerts():
+                    def mark_read():
                         from aircraft_detection.models import AircraftDetection
-                        
-                        queryset = AircraftDetection.objects.filter(
-                            status='pending'
-                        ).exclude(severity='low')
-                        
-                        if camera_id:
-                            queryset = queryset.filter(camera_id=camera_id)
-                        
-                        alerts = queryset.order_by('-detection_time')[:count]
-                        
-                        return [{
-                            'id': str(a.detection_id),
-                            'detection_type': a.detection_type,
-                            'action': a.action,
-                            'confidence': a.confidence,
-                            'title': a.title,
-                            'description': a.description,
-                            'severity': a.severity,
-                            'status': a.status,
-                            'camera_id': a.camera_id,
-                            'camera_name': a.camera_name,
-                            'detection_time': a.detection_time.isoformat(),
-                            'image_url': a.image.url if a.image else None,
-                        } for a in alerts]
+                        AircraftDetection.objects.filter(
+                            detection_id=alert_id
+                        ).update(is_read=True)
                     
-                    alerts = await get_alerts()
+                    await mark_read()
                     
                     await self.send(text_data=json.dumps({
-                        'type': 'alerts',
-                        'alerts': alerts,
+                        'type': 'alert_marked_read',
+                        'alert_id': alert_id,
                         'timestamp': time.time()
                     }, cls=UUIDEncoder))
+            
+            elif command == 'mark_all_read':
+                # Mark all alerts as read
+                camera_id = data.get('camera_id')
                 
-                else:
-                    await self.send(text_data=json.dumps({
-                        "type": "error",
-                        "message": f"Unknown command: {command}",
-                        "timestamp": time.time()
-                    }, cls=UUIDEncoder))
+                @sync_to_async
+                def mark_all_read():
+                    from aircraft_detection.models import AircraftDetection
+                    queryset = AircraftDetection.objects.filter(is_read=False)
+                    if camera_id:
+                        queryset = queryset.filter(camera_id=camera_id)
+                    count = queryset.update(is_read=True)
+                    return count
+                
+                count = await mark_all_read()
+                
+                await self.send(text_data=json.dumps({
+                    'type': 'all_alerts_marked_read',
+                    'count': count,
+                    'timestamp': time.time()
+                }, cls=UUIDEncoder))
+            
+            elif command == 'get_unread_count':
+                # Get unread alert count
+                @sync_to_async
+                def get_count():
+                    from aircraft_detection.models import AircraftDetection
+                    return AircraftDetection.objects.filter(is_read=False).count()
+                
+                count = await get_count()
+                
+                await self.send(text_data=json.dumps({
+                    'type': 'unread_count',
+                    'count': count,
+                    'timestamp': time.time()
+                }, cls=UUIDEncoder))
+            
+            else:
+                await self.send(text_data=json.dumps({
+                    "type": "error",
+                    "message": f"Unknown command: {command}",
+                    "timestamp": time.time()
+                }, cls=UUIDEncoder))
         
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
@@ -599,5 +643,6 @@ class AlertsConsumer(AsyncWebsocketConsumer):
             }, cls=UUIDEncoder))
         except Exception as e:
             logger.error(f"Error handling message: {e}")
+            traceback.print_exc()
 
 

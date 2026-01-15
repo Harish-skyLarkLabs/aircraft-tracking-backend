@@ -4,15 +4,15 @@ Views for cameras app
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from django.http import JsonResponse, StreamingHttpResponse
+from rest_framework.permissions import IsAuthenticated
+from django.http import JsonResponse
 import base64
 import cv2
 import logging
 
 from .models import Camera
 from .serializers import CameraSerializer, CameraCreateSerializer
-from .utils import check_rtsp, get_stream_info, mjpeg_manager
+from .utils import check_rtsp, get_stream_info
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,6 @@ class CameraViewSet(viewsets.ModelViewSet):
         ai_enabled = self.request.query_params.get('ai_enabled', None)
         if ai_enabled is not None:
             queryset = queryset.filter(ai_enabled=ai_enabled.lower() == 'true')
-        
-        is_streaming = self.request.query_params.get('is_streaming', None)
-        if is_streaming is not None:
-            queryset = queryset.filter(is_streaming=is_streaming.lower() == 'true')
         
         return queryset
 
@@ -266,65 +262,3 @@ class CameraViewSet(viewsets.ModelViewSet):
                 pass
 
         return super().destroy(request, *args, **kwargs)
-
-    @action(detail=True, methods=["get"], url_path="stream", permission_classes=[AllowAny])
-    def stream(self, request, pk=None):
-        """
-        MJPEG streaming endpoint for a camera.
-        Returns a multipart/x-mixed-replace response with JPEG frames.
-        """
-        try:
-            camera = Camera.objects.get(pk=pk)
-        except Camera.DoesNotExist:
-            return Response(
-                {"error": "Camera not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        if not camera.is_active:
-            return Response(
-                {"error": "Camera is not active"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not camera.rtsp_link:
-            return Response(
-                {"error": "Camera has no RTSP link configured"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Update streaming status
-        camera.is_streaming = True
-        camera.save(update_fields=['is_streaming'])
-        
-        def stream_generator():
-            try:
-                for frame in mjpeg_manager.get_stream(str(camera.camera_id), camera.rtsp_link):
-                    yield frame
-            finally:
-                # Update streaming status when client disconnects
-                if not mjpeg_manager.is_streaming(str(camera.camera_id)):
-                    camera.is_streaming = False
-                    camera.save(update_fields=['is_streaming'])
-        
-        response = StreamingHttpResponse(
-            stream_generator(),
-            content_type='multipart/x-mixed-replace; boundary=frame'
-        )
-        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response['Pragma'] = 'no-cache'
-        response['Expires'] = '0'
-        response['Access-Control-Allow-Origin'] = '*'
-        
-        return response
-    
-    @action(detail=True, methods=["get"], url_path="stream/status")
-    def stream_status(self, request, pk=None):
-        """Get the streaming status for a camera."""
-        camera = self.get_object()
-        
-        return Response({
-            "camera_id": str(camera.camera_id),
-            "is_streaming": mjpeg_manager.is_streaming(str(camera.camera_id)),
-            "client_count": mjpeg_manager.get_client_count(str(camera.camera_id)),
-        })

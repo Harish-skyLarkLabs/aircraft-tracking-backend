@@ -143,6 +143,36 @@ class AircraftDetectionViewSet(viewsets.ModelViewSet):
         serializer = AircraftDetectionListSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='video-url')
+    def get_video_url(self, request, pk=None):
+        """Get a fresh presigned URL for the video"""
+        from backend.storage import minio_storage
+        from datetime import timedelta
+        
+        detection = self.get_object()
+        
+        if not detection.video_path:
+            return Response(
+                {'error': 'No video available for this detection'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        presigned_url = minio_storage.get_presigned_url(
+            detection.video_path,
+            expires=timedelta(hours=24)
+        )
+        
+        if presigned_url:
+            return Response({
+                'video_url': presigned_url,
+                'expires_in': 24 * 60 * 60,  # 24 hours in seconds
+            })
+        else:
+            return Response(
+                {'error': 'Failed to generate video URL'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class DetectionSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for DetectionSession model"""

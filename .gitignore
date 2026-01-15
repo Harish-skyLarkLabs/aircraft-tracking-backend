@@ -172,3 +172,15 @@ logs/
 # Database
 *.db
 *.sqlite3
+
+# ML Models (large files - download separately)
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# MinIO data (local development)
+infra/data/
+infra/data/minio/
+infra/data/postgres/
+infra/data/redis/

@@ -146,18 +146,60 @@ class MinIOStorage:
             content_type="image/jpeg"
         )
     
-    def upload_alert_image(self, camera_id: str, alert_id: str, data: bytes) -> Optional[str]:
-        """Upload alert detection image."""
+    def upload_alert_image(
+        self,
+        camera_id: str,
+        alert_id: str,
+        image_bytes: bytes,
+        suffix: str = "",
+    ) -> Optional[str]:
+        """
+        Upload alert detection snapshot image.
+        
+        Args:
+            camera_id: Camera UUID
+            alert_id: Alert/Detection UUID
+            image_bytes: JPEG image bytes
+            suffix: Optional suffix for filename (e.g., "_initial", "_final")
+            
+        Returns:
+            Object path if successful
+        """
         return self.upload_file(
             camera_id=str(camera_id),
             folder="alerts",
-            filename=f"{alert_id}.jpg",
-            data=data,
+            filename=f"{alert_id}{suffix}.jpg",
+            data=image_bytes,
             content_type="image/jpeg"
         )
     
+    def upload_alert_video(
+        self,
+        camera_id: str,
+        alert_id: str,
+        video_bytes: Union[bytes, BinaryIO]
+    ) -> Optional[str]:
+        """
+        Upload alert video recording.
+        
+        Args:
+            camera_id: Camera UUID
+            alert_id: Alert/Detection UUID
+            video_bytes: MP4 video bytes or file object
+            
+        Returns:
+            Object path if successful
+        """
+        return self.upload_file(
+            camera_id=str(camera_id),
+            folder="videos",
+            filename=f"{alert_id}.mp4",
+            data=video_bytes,
+            content_type="video/mp4"
+        )
+    
     def upload_video(self, camera_id: str, video_id: str, data: Union[bytes, BinaryIO]) -> Optional[str]:
-        """Upload video recording."""
+        """Upload video recording (generic)."""
         return self.upload_file(
             camera_id=str(camera_id),
             folder="videos",

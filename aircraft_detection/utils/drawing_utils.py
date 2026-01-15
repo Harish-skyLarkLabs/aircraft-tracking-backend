@@ -104,6 +104,7 @@ def draw_aircraft_detection(
     track_id: int = 0,
     confidence: float = 0.0,
     flight_number: Optional[str] = None,
+    draw_box: bool = True,
 ) -> np.ndarray:
     """
     Draw aircraft detection with all relevant information
@@ -116,6 +117,7 @@ def draw_aircraft_detection(
         track_id: Tracking ID
         confidence: Detection confidence
         flight_number: Flight number if available
+        draw_box: Whether to draw the bounding box (set False if already drawn by ultralytics)
     
     Returns:
         Modified frame
@@ -135,31 +137,32 @@ def draw_aircraft_detection(
     
     x1, y1, x2, y2 = map(int, bbox)
     
-    # Draw main bounding box
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    if draw_box:
+        # Draw main bounding box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        
+        # Draw corner accents for better visibility
+        corner_length = min(20, (x2 - x1) // 4, (y2 - y1) // 4)
+        cv2.line(frame, (x1, y1), (x1 + corner_length, y1), color, 3)
+        cv2.line(frame, (x1, y1), (x1, y1 + corner_length), color, 3)
+        cv2.line(frame, (x2, y1), (x2 - corner_length, y1), color, 3)
+        cv2.line(frame, (x2, y1), (x2, y1 + corner_length), color, 3)
+        cv2.line(frame, (x1, y2), (x1 + corner_length, y2), color, 3)
+        cv2.line(frame, (x1, y2), (x1, y2 - corner_length), color, 3)
+        cv2.line(frame, (x2, y2), (x2 - corner_length, y2), color, 3)
+        cv2.line(frame, (x2, y2), (x2, y2 - corner_length), color, 3)
+        
+        # Build label
+        label_parts = [f"{detection_type.upper()}-{track_id}"]
+        if confidence > 0:
+            label_parts.append(f"{confidence:.0%}")
+        label = " ".join(label_parts)
+        
+        # Draw main label
+        draw_text_with_background(frame, label, (x1, y1 - 10), color)
     
-    # Draw corner accents for better visibility
-    corner_length = min(20, (x2 - x1) // 4, (y2 - y1) // 4)
-    cv2.line(frame, (x1, y1), (x1 + corner_length, y1), color, 3)
-    cv2.line(frame, (x1, y1), (x1, y1 + corner_length), color, 3)
-    cv2.line(frame, (x2, y1), (x2 - corner_length, y1), color, 3)
-    cv2.line(frame, (x2, y1), (x2, y1 + corner_length), color, 3)
-    cv2.line(frame, (x1, y2), (x1 + corner_length, y2), color, 3)
-    cv2.line(frame, (x1, y2), (x1, y2 - corner_length), color, 3)
-    cv2.line(frame, (x2, y2), (x2 - corner_length, y2), color, 3)
-    cv2.line(frame, (x2, y2), (x2, y2 - corner_length), color, 3)
-    
-    # Build label
-    label_parts = [f"{detection_type.upper()}-{track_id}"]
-    if confidence > 0:
-        label_parts.append(f"{confidence:.0%}")
-    label = " ".join(label_parts)
-    
-    # Draw main label
-    draw_text_with_background(frame, label, (x1, y1 - 10), color)
-    
-    # Draw action label
-    action_label = action.upper()
+    # Draw action label (always show tracking info)
+    action_label = f"ID:{track_id} {action.upper()}"
     draw_text_with_background(frame, action_label, (x1, y2 + 20), color)
     
     # Draw flight number if available

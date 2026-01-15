@@ -28,7 +28,7 @@ class Camera(models.Model):
     # Status
     is_healthy = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
-    is_streaming = models.BooleanField(default=True, help_text="Whether streaming is enabled (auto-enabled on creation)")
+    is_streaming = models.BooleanField(default=True, help_text="Whether WebSocket streaming is enabled")
     ai_enabled = models.BooleanField(default=False, help_text="Whether AI inference is enabled for this camera")
     
     # MinIO Storage Paths (stores object path, not full URL)

@@ -71,6 +71,7 @@ class AircraftDetection(models.Model):
     # Alert info
     severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='low')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    is_read = models.BooleanField(default=False, help_text="Whether the alert has been viewed")
     title = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     
@@ -143,14 +144,28 @@ class AircraftDetection(models.Model):
     def image_url(self) -> str | None:
         """Get the full MinIO URL for the detection image."""
         if self.image_path:
+            # Images use public URL (small files, cacheable)
             return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.image_path}"
         return None
     
     @property
     def video_url(self) -> str | None:
-        """Get the full MinIO URL for the detection video."""
+        """Get a presigned URL for the detection video (required for browser playback)."""
         if self.video_path:
-            return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.video_path}"
+            try:
+                from backend.storage import minio_storage
+                from datetime import timedelta
+                # Use presigned URL for videos (larger files, need auth)
+                presigned = minio_storage.get_presigned_url(
+                    self.video_path, 
+                    expires=timedelta(hours=24)
+                )
+                if presigned:
+                    return presigned
+                # Fallback to public URL
+                return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.video_path}"
+            except Exception:
+                return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.video_path}"
         return None
 
 

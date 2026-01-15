@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # aircraft-backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8100:8000"
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - .:/app
+  #     - /tmp/.X11-unix:/tmp/.X11-unix
+  #   command: /start.sh
+  #   environment:
+  #     - DISPLAY=$DISPLAY
+  #   depends_on:
+  #     - db
+  #     - redis
+  #   runtime: nvidia
+  #   shm_size: 4g
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-file: "1"
+  #       max-size: "10m"
+  #   mem_limit: 8g
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             device_ids: ['0']
+  #             capabilities: [gpu]
+
+  # celery:
+  #   restart: always
+  #   build:
+  #     context: .
+  #   command: /celery.sh
+  #   environment:
+  #     - DISPLAY=$DISPLAY
+  #   volumes:
+  #     - ./:/app
+  #     - /tmp/.X11-unix:/tmp/.X11-unix
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - db
+  #     - redis
+  #     - aircraft-backend
+  #   runtime: nvidia
+  #   shm_size: 4g
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-file: "1"
+  #       max-size: "10m"
+  #   mem_limit: 8g
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             device_ids: ['0']
+  #             capabilities: [gpu]
+
+  # db:
+  #   image: postgres:15.4-alpine
+  #   restart: always
+  #   ports:
+  #     - "5433:5432"
+  #   volumes:
+  #     - ./data/db:/var/lib/postgresql/data
+  #   environment:
+  #     - POSTGRES_DB=aircraft_tracking
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #   healthcheck:
+  #     test: ["CMD", "pg_isready", "-h", "db", "-p", "5432", "-U", "postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+
+  redis:
+    restart: always
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+
+  minio:
+    image: minio/minio:latest
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3

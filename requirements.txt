@@ -1,0 +1,70 @@
+# Django and REST Framework
+Django==5.1.6
+djangorestframework==3.15.2
+django-cors-headers==4.7.0
+drf-yasg==1.21.8
+
+# ASGI and WebSocket
+asgiref==3.8.1
+channels==4.2.0
+channels_redis==4.2.1
+daphne==4.1.2
+
+# Celery for background tasks
+celery[redis]
+django-celery-beat
+django-celery-results
+
+# Database
+psycopg2-binary==2.9.10
+
+# Redis
+redis==5.2.1
+
+# AI/ML Libraries
+numpy==1.26.4
+opencv-python==4.11.0.86
+opencv-python-headless==4.11.0.86
+opencv-contrib-python==4.10.0.84
+pillow==11.1.0
+ultralytics==8.3.49
+ultralytics-thop==2.0.14
+
+# PyTorch (installed separately in Dockerfile for CUDA support)
+# torch==2.6.0
+# torchvision==0.21.0
+
+# Data Processing
+pandas==2.2.3
+scipy==1.15.2
+matplotlib==3.10.0
+seaborn==0.13.2
+
+# Utilities
+python-dotenv==1.0.1
+python-dateutil==2.9.0.post0
+pytz==2025.1
+PyYAML==6.0.2
+requests==2.32.3
+tqdm==4.67.1
+imutils
+
+# Authentication
+PyJWT==2.10.1
+
+# Server
+gunicorn==23.0.0
+
+# Networking
+websockets==15.0
+Twisted==24.11.0
+
+# Object Storage
+minio==7.2.12
+
+# Misc
+colorama==0.4.6
+filelock==3.17.0
+packaging==24.2
+typing_extensions==4.12.2
+

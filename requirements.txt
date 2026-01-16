@@ -59,6 +59,10 @@ gunicorn==23.0.0
 websockets==15.0
 Twisted==24.11.0
 
+# LiveKit WebRTC streaming
+livekit==0.13.0
+livekit-api==0.6.0
+
 # Object Storage
 minio==7.2.12
 

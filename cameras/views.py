@@ -1,5 +1,5 @@
 """
-Views for cameras app with PTZ support
+Views for cameras app with PTZ support and LiveKit WebRTC streaming
 """
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -9,10 +9,20 @@ from django.http import JsonResponse
 import base64
 import cv2
 import logging
+import asyncio
 
 from .models import Camera
 from .serializers import CameraSerializer, CameraCreateSerializer, CameraUpdateSerializer, PTZControlSerializer
 from .utils import check_rtsp, get_stream_info
+
+# LiveKit integration
+from aircraft_detection.utils.livekit_client import (
+    livekit_client,
+    get_viewer_token,
+    get_livekit_url,
+    get_room_name,
+    is_livekit_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +431,197 @@ class CameraViewSet(viewsets.ModelViewSet):
                 "ptz_enabled": camera.ptz_enabled,
             }, status=status.HTTP_200_OK)
 
+    # LiveKit WebRTC Streaming Endpoints
+    
+    @action(detail=True, methods=["get"], url_path="stream/token")
+    def get_stream_token(self, request, pk=None):
+        """
+        Get a LiveKit viewer token for streaming this camera.
+        
+        Returns a JWT token that the frontend can use to connect to the
+        LiveKit room and receive the WebRTC video stream.
+        """
+        camera = self.get_object()
+        camera_id = str(camera.camera_id)
+        
+        # Get user info from request
+        user = request.user
+        user_id = str(user.id) if hasattr(user, 'id') else 'anonymous'
+        user_name = getattr(user, 'username', '') or getattr(user, 'email', '') or user_id
+        
+        # Check if LiveKit is enabled
+        if not is_livekit_enabled():
+            return Response({
+                "status": "warning",
+                "message": "LiveKit streaming is not enabled. Using WebSocket fallback.",
+                "livekit_enabled": False,
+                "camera_id": camera_id,
+                "websocket_url": f"/ws/video-feed/{camera_id}/",
+            }, status=status.HTTP_200_OK)
+        
+        # Generate viewer token
+        token = get_viewer_token(camera_id, user_id, user_name)
+        
+        if not token:
+            return Response({
+                "status": "error",
+                "message": "Failed to generate stream token",
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response({
+            "status": "success",
+            "livekit_enabled": True,
+            "token": token,
+            "livekit_url": get_livekit_url(),
+            "room_name": get_room_name(camera_id),
+            "camera_id": camera_id,
+            "camera_name": camera.name,
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=["get"], url_path="stream/info")
+    def get_stream_info_endpoint(self, request, pk=None):
+        """
+        Get streaming information for a camera.
+        
+        Returns both LiveKit (WebRTC) and WebSocket streaming options,
+        allowing the frontend to choose the best method.
+        """
+        camera = self.get_object()
+        camera_id = str(camera.camera_id)
+        
+        response_data = {
+            "status": "success",
+            "camera_id": camera_id,
+            "camera_name": camera.name,
+            "ai_enabled": camera.ai_enabled,
+            "is_healthy": camera.is_healthy,
+            # WebSocket streaming (always available as fallback)
+            "websocket": {
+                "enabled": True,
+                "video_url": f"/ws/video-feed/{camera_id}/",
+                "detections_url": f"/ws/detections/{camera_id}/",
+            },
+            # LiveKit streaming
+            "livekit": {
+                "enabled": is_livekit_enabled(),
+                "url": get_livekit_url() if is_livekit_enabled() else None,
+                "room_name": get_room_name(camera_id) if is_livekit_enabled() else None,
+                "token_endpoint": f"/api/cameras/{camera_id}/stream/token/",
+            },
+        }
+        
+        # Add LiveKit stream status if enabled
+        if is_livekit_enabled():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                stream_status = loop.run_until_complete(
+                    livekit_client.get_stream_status(camera_id)
+                )
+                loop.close()
+                response_data["livekit"]["stream_status"] = stream_status
+            except Exception as e:
+                logger.error(f"Error getting LiveKit stream status: {e}")
+                response_data["livekit"]["stream_status"] = {"error": str(e)}
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=["post"], url_path="stream/start")
+    def start_livekit_stream(self, request, pk=None):
+        """
+        Start LiveKit ingress for a camera (register RTSP stream with LiveKit).
+        
+        This creates a LiveKit ingress that converts the RTSP stream to WebRTC.
+        """
+        camera = self.get_object()
+        camera_id = str(camera.camera_id)
+        
+        if not is_livekit_enabled():
+            return Response({
+                "status": "error",
+                "message": "LiveKit is not enabled",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not camera.rtsp_link:
+            return Response({
+                "status": "error",
+                "message": "Camera has no RTSP link configured",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            ingress_info = loop.run_until_complete(
+                livekit_client.create_ingress(
+                    camera_id=camera_id,
+                    rtsp_url=camera.rtsp_link,
+                    camera_name=camera.name,
+                )
+            )
+            loop.close()
+            
+            if ingress_info:
+                return Response({
+                    "status": "success",
+                    "message": "LiveKit stream started",
+                    "camera_id": camera_id,
+                    "ingress_id": ingress_info.ingress_id,
+                    "room_name": ingress_info.room_name,
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "status": "error",
+                    "message": "Failed to create LiveKit ingress",
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            logger.error(f"Error starting LiveKit stream: {e}")
+            return Response({
+                "status": "error",
+                "message": str(e),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=["post"], url_path="stream/stop")
+    def stop_livekit_stream(self, request, pk=None):
+        """
+        Stop LiveKit ingress for a camera.
+        """
+        camera = self.get_object()
+        camera_id = str(camera.camera_id)
+        
+        if not is_livekit_enabled():
+            return Response({
+                "status": "error",
+                "message": "LiveKit is not enabled",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = loop.run_until_complete(
+                livekit_client.delete_ingress(camera_id)
+            )
+            loop.close()
+            
+            if success:
+                return Response({
+                    "status": "success",
+                    "message": "LiveKit stream stopped",
+                    "camera_id": camera_id,
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "status": "error",
+                    "message": "Failed to stop LiveKit stream",
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            logger.error(f"Error stopping LiveKit stream: {e}")
+            return Response({
+                "status": "error",
+                "message": str(e),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def destroy(self, request, *args, **kwargs):
         """Override destroy to stop processing and cleanup all data before deletion."""
         instance = self.get_object()
@@ -435,7 +636,18 @@ class CameraViewSet(viewsets.ModelViewSet):
             except ImportError:
                 logger.warning("Camera manager not available during camera deletion")
 
-        # 2. Delete all detection records from database
+        # 2. Stop LiveKit ingress if enabled
+        if is_livekit_enabled():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(livekit_client.delete_ingress(camera_id))
+                loop.close()
+                logger.info(f"Deleted LiveKit ingress for camera {camera_id}")
+            except Exception as e:
+                logger.error(f"Error deleting LiveKit ingress for camera {camera_id}: {e}")
+
+        # 3. Delete all detection records from database
         try:
             from aircraft_detection.models import AircraftDetection
             detection_count = AircraftDetection.objects.filter(camera_id=camera_id).count()
@@ -444,7 +656,7 @@ class CameraViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error deleting detection records for camera {camera_id}: {e}")
 
-        # 3. Delete all files from MinIO (thumbnails, alert images, videos)
+        # 4. Delete all files from MinIO (thumbnails, alert images, videos)
         try:
             from backend.storage import minio_storage
             success = minio_storage.delete_camera_files(camera_id)
@@ -455,6 +667,6 @@ class CameraViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error deleting MinIO files for camera {camera_id}: {e}")
 
-        # 4. Delete the camera record
+        # 5. Delete the camera record
         logger.info(f"Deleting camera {camera_id} - {instance.name}")
         return super().destroy(request, *args, **kwargs)

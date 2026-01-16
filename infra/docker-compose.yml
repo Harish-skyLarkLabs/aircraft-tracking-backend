@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # aircraft-backend:
   #   build:
@@ -107,3 +105,33 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+
+  # LiveKit Server - WebRTC SFU for low-latency video streaming
+  # Using host network mode for better WebRTC connectivity
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: always
+    network_mode: host
+    environment:
+      - "LIVEKIT_KEYS=devkey: secret"
+    command: --config /etc/livekit.yaml --dev
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # LiveKit Ingress - RTSP to WebRTC conversion
+  livekit-ingress:
+    image: livekit/ingress:latest
+    restart: always
+    environment:
+      - INGRESS_CONFIG_FILE=/etc/ingress.yaml
+    volumes:
+      - ./ingress.yaml:/etc/ingress.yaml:ro
+    depends_on:
+      livekit:
+        condition: service_healthy
+    network_mode: host

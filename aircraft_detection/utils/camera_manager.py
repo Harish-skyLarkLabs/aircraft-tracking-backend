@@ -6,11 +6,14 @@ Provides:
 - PTZ controller integration
 - Enhanced RTSP streaming with GStreamer support
 - Frame processing with detection and tracking
+- LiveKit WebRTC publishing (optional)
 """
 import cv2
 import threading
+import asyncio
 import time
 import logging
+import os
 import numpy as np
 from typing import Dict, Optional, Set, Tuple
 from uuid import UUID
@@ -21,6 +24,19 @@ from .stream_handler import RTSPStreamHandler, StreamHandler
 from .ptz_controller import PTZController, get_ptz_controller, remove_ptz_controller
 
 logger = logging.getLogger(__name__)
+
+# Check if LiveKit is enabled
+USE_LIVEKIT = os.getenv("USE_LIVEKIT", "false").lower() == "true"
+if USE_LIVEKIT:
+    try:
+        from .livekit_publisher import LiveKitPublisher, PublisherConfig
+        LIVEKIT_PUBLISHER_AVAILABLE = True
+        logger.info("LiveKit publisher integration enabled")
+    except ImportError as e:
+        LIVEKIT_PUBLISHER_AVAILABLE = False
+        logger.warning(f"LiveKit publisher not available: {e}")
+else:
+    LIVEKIT_PUBLISHER_AVAILABLE = False
 
 
 class CameraSystem:
@@ -197,7 +213,11 @@ class CameraManager:
         self.frame_ids: Dict[str, int] = defaultdict(int)
         self._lock = threading.Lock()
         
-        logger.info("CameraManager initialized")
+        # LiveKit publishers (one per camera)
+        self.livekit_publishers: Dict[str, 'LiveKitPublisher'] = {}
+        self._livekit_loops: Dict[str, asyncio.AbstractEventLoop] = {}
+        
+        logger.info(f"CameraManager initialized (LiveKit: {USE_LIVEKIT and LIVEKIT_PUBLISHER_AVAILABLE})")
     
     def initialize(self):
         """Initialize the camera manager (called on first use)"""
@@ -335,6 +355,40 @@ class CameraManager:
         """Process frames for a camera in a background thread"""
         logger.info(f"Started frame processing thread for camera {camera_id}")
         
+        # Initialize LiveKit publisher if enabled
+        livekit_publisher = None
+        livekit_loop = None
+        
+        if USE_LIVEKIT and LIVEKIT_PUBLISHER_AVAILABLE:
+            try:
+                camera_info = self.cameras.get(camera_id, {})
+                camera_name = camera_info.get('camera_name', f'Camera {camera_id}')
+                rtsp_url = camera_info.get('rtsp_link', '')
+                
+                livekit_publisher = LiveKitPublisher(
+                    camera_id=camera_id,
+                    rtsp_url=rtsp_url,
+                    camera_name=camera_name,
+                )
+                
+                # Create event loop for async operations
+                livekit_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(livekit_loop)
+                
+                # Start publisher
+                started = livekit_loop.run_until_complete(livekit_publisher.start())
+                if started:
+                    self.livekit_publishers[camera_id] = livekit_publisher
+                    self._livekit_loops[camera_id] = livekit_loop
+                    logger.info(f"LiveKit publisher started for camera {camera_id}")
+                else:
+                    logger.warning(f"Failed to start LiveKit publisher for camera {camera_id}")
+                    livekit_publisher = None
+                    
+            except Exception as e:
+                logger.error(f"Error initializing LiveKit publisher for camera {camera_id}: {e}")
+                livekit_publisher = None
+        
         while camera_id in self.camera_systems:
             try:
                 camera_system = self.camera_systems.get(camera_id)
@@ -372,6 +426,13 @@ class CameraManager:
                     'timestamp': time.time(),
                 }
                 
+                # Publish to LiveKit if enabled (synchronous call)
+                if livekit_publisher and livekit_publisher.is_connected:
+                    try:
+                        livekit_publisher.publish_frame(processed_frame, detections)
+                    except Exception as e:
+                        logger.debug(f"Error publishing frame to LiveKit: {e}")
+                
                 # Rate limiting
                 target_interval = 1.0 / 15  # 15 FPS
                 if process_time < target_interval:
@@ -380,6 +441,19 @@ class CameraManager:
             except Exception as e:
                 logger.error(f"Error processing frame for camera {camera_id}: {e}")
                 time.sleep(0.1)
+        
+        # Cleanup LiveKit publisher
+        if livekit_publisher and livekit_loop:
+            try:
+                livekit_loop.run_until_complete(livekit_publisher.stop())
+                self.livekit_publishers.pop(camera_id, None)
+                self._livekit_loops.pop(camera_id, None)
+                logger.info(f"LiveKit publisher stopped for camera {camera_id}")
+            except Exception as e:
+                logger.error(f"Error stopping LiveKit publisher: {e}")
+            finally:
+                if livekit_loop:
+                    livekit_loop.close()
         
         logger.info(f"Stopped frame processing thread for camera {camera_id}")
     

@@ -1,8 +1,15 @@
 """
-WebSocket consumers for real-time video feed and alerts
+WebSocket consumers for real-time video feed and alerts.
+
+Supports two streaming modes:
+1. WebSocket frames (legacy) - Sends Base64-encoded JPEG frames
+2. LiveKit mode - Sends only detection data, video comes from LiveKit WebRTC
+
+Set USE_LIVEKIT=true in environment to enable LiveKit mode.
 """
 import json
 import asyncio
+import os
 import cv2
 import base64
 import time
@@ -17,6 +24,9 @@ from asgiref.sync import sync_to_async
 from .utils.camera_manager import camera_manager
 
 logger = logging.getLogger(__name__)
+
+# Check if LiveKit mode is enabled
+USE_LIVEKIT = os.getenv("USE_LIVEKIT", "false").lower() == "true"
 
 
 def convert_to_serializable(obj):
@@ -81,7 +91,13 @@ def encode_frame_to_base64(frame: np.ndarray, quality: int = 70) -> str:
 
 
 class VideoFeedConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for real-time video feed"""
+    """
+    WebSocket consumer for real-time video feed.
+    
+    Supports two modes:
+    - Legacy mode: Sends Base64-encoded JPEG frames (USE_LIVEKIT=false)
+    - LiveKit mode: Sends only detection data (USE_LIVEKIT=true)
+    """
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -89,6 +105,7 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
         self.client_id = str(uuid.uuid4())
         self.is_connected = False
         self.send_frames_task = None
+        self.send_detections_task = None
         self.check_detections_task = None
         
         self.last_frame_id = 0
@@ -97,10 +114,14 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
         self.frame_interval = 1.0 / self.target_fps
         
         self.last_seen_detections = set()
+        self.last_sent_detections = []
         
         # Direct stream handler for when processing is not active
         self.direct_stream = None
         self.camera_rtsp_link = None
+        
+        # LiveKit mode flag
+        self.use_livekit = USE_LIVEKIT
     
     async def connect(self):
         """Handle WebSocket connection"""
@@ -118,21 +139,44 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
         # Register client
         camera_manager.register_client(self.camera_id, self.client_id)
         
-        logger.info(f"WebSocket connected: client {self.client_id} on camera {self.camera_id}")
+        logger.info(f"WebSocket connected: client {self.client_id} on camera {self.camera_id} (LiveKit: {self.use_livekit})")
         
-        # Send initial status
+        # Send initial status with LiveKit info
         camera_status = camera_manager.get_camera_status(self.camera_id)
+        
+        # Get LiveKit info if enabled
+        livekit_info = None
+        if self.use_livekit:
+            try:
+                from .utils.livekit_client import get_livekit_url, get_room_name, is_livekit_enabled
+                if is_livekit_enabled():
+                    livekit_info = {
+                        "enabled": True,
+                        "url": get_livekit_url(),
+                        "room_name": get_room_name(str(self.camera_id)),
+                        "token_endpoint": f"/api/cameras/{self.camera_id}/stream/token/",
+                    }
+            except ImportError:
+                pass
+        
         await self.send(text_data=json.dumps({
             "type": "connection_status",
             "camera_id": str(self.camera_id),
             "processing_active": camera_status.get('active', False),
+            "use_livekit": self.use_livekit,
+            "livekit": livekit_info,
             "timestamp": time.time()
         }, cls=UUIDEncoder))
         
-        # Start frame sending task
-        self.send_frames_task = asyncio.create_task(self.send_frames_periodically())
+        # Start appropriate tasks based on mode
+        if self.use_livekit:
+            # LiveKit mode: only send detection data, no frames
+            self.send_detections_task = asyncio.create_task(self.send_detections_periodically())
+        else:
+            # Legacy mode: send frames via WebSocket
+            self.send_frames_task = asyncio.create_task(self.send_frames_periodically())
         
-        # Start detection checking task
+        # Start detection checking task (for alerts)
         self.check_detections_task = asyncio.create_task(self.check_new_detections())
     
     async def _load_camera_info(self):
@@ -175,6 +219,13 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
             self.send_frames_task.cancel()
             try:
                 await self.send_frames_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.send_detections_task:
+            self.send_detections_task.cancel()
+            try:
+                await self.send_detections_task
             except asyncio.CancelledError:
                 pass
         
@@ -306,6 +357,88 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error in send_frames_periodically: {e}")
             traceback.print_exc()
             self._stop_direct_stream()
+    
+    async def send_detections_periodically(self):
+        """
+        Task to send only detection data (LiveKit mode).
+        
+        In LiveKit mode, video comes from WebRTC, so we only need to send
+        detection bounding boxes and metadata for the frontend to overlay.
+        """
+        try:
+            logger.info(f"Started detection sending task for client {self.client_id} (LiveKit mode)")
+            await asyncio.sleep(0.1)
+            
+            detection_interval = 0.1  # 10 Hz detection updates
+            
+            while self.is_connected:
+                try:
+                    # Check if camera processing is active
+                    camera_status = camera_manager.get_camera_status(self.camera_id)
+                    processing_active = camera_status.get('active', False)
+                    
+                    if processing_active:
+                        # Get latest frame data (for detections only)
+                        frame_data = camera_manager.get_latest_frame(self.camera_id)
+                        
+                        # Skip if same frame
+                        if frame_data.get('frame_id', 0) == self.last_frame_id:
+                            await asyncio.sleep(detection_interval)
+                            continue
+                        
+                        detections = frame_data.get('detections', [])
+                        process_time = frame_data.get('process_time', 0)
+                        frame_id = frame_data.get('frame_id', 0)
+                        self.last_frame_id = frame_id
+                        
+                        # Convert detections to serializable format
+                        detections = convert_to_serializable(detections)
+                        
+                        # Send detection data (no frame)
+                        response = {
+                            "type": "detections",
+                            "processing_active": True,
+                            "detections": detections,
+                            "timestamp": time.time(),
+                            "frame_id": frame_id,
+                            "stats": {
+                                "process_time_ms": round(process_time * 1000, 2),
+                                "fps": round(1.0 / max(0.001, time.time() - self.last_frame_time), 1) if self.last_frame_time > 0 else 0,
+                                "active_tracks": len(detections)
+                            }
+                        }
+                        
+                        await self.send(text_data=json.dumps(response, cls=UUIDEncoder))
+                        self.last_frame_time = time.time()
+                        self.last_sent_detections = detections
+                    else:
+                        # AI not active - send empty detections
+                        if self.last_sent_detections:
+                            await self.send(text_data=json.dumps({
+                                "type": "detections",
+                                "processing_active": False,
+                                "detections": [],
+                                "timestamp": time.time(),
+                                "frame_id": 0,
+                                "stats": {
+                                    "process_time_ms": 0,
+                                    "fps": 0,
+                                    "active_tracks": 0
+                                }
+                            }, cls=UUIDEncoder))
+                            self.last_sent_detections = []
+                    
+                    await asyncio.sleep(detection_interval)
+                    
+                except Exception as e:
+                    logger.error(f"Error sending detections: {e}")
+                    await asyncio.sleep(0.5)
+        
+        except asyncio.CancelledError:
+            logger.info(f"Detection sending task cancelled for client {self.client_id}")
+        except Exception as e:
+            logger.error(f"Error in send_detections_periodically: {e}")
+            traceback.print_exc()
     
     async def check_new_detections(self):
         """Task to check for new detections and send alerts"""
@@ -445,6 +578,147 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Error handling message: {e}")
             traceback.print_exc()
+
+
+class DetectionsConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time AI detection data only.
+    
+    This is a lightweight consumer specifically for LiveKit mode where
+    video comes from WebRTC and we only need to send detection overlays.
+    
+    Endpoint: /ws/detections/<camera_id>/
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.camera_id = None
+        self.client_id = str(uuid.uuid4())
+        self.is_connected = False
+        self.send_detections_task = None
+        self.last_frame_id = 0
+        self.last_frame_time = 0
+    
+    async def connect(self):
+        """Handle WebSocket connection"""
+        camera_manager.initialize()
+        
+        self.camera_id = self.scope['url_route']['kwargs']['camera_id']
+        self.camera_id = UUID(self.camera_id)
+        
+        await self.accept()
+        self.is_connected = True
+        
+        logger.info(f"Detections WebSocket connected: client {self.client_id} on camera {self.camera_id}")
+        
+        # Send initial status
+        camera_status = camera_manager.get_camera_status(self.camera_id)
+        await self.send(text_data=json.dumps({
+            "type": "connection_status",
+            "camera_id": str(self.camera_id),
+            "processing_active": camera_status.get('active', False),
+            "timestamp": time.time()
+        }, cls=UUIDEncoder))
+        
+        # Start detection sending task
+        self.send_detections_task = asyncio.create_task(self._send_detections_loop())
+    
+    async def disconnect(self, close_code):
+        """Handle WebSocket disconnection"""
+        logger.info(f"Detections WebSocket disconnecting: client {self.client_id}")
+        
+        if self.send_detections_task:
+            self.send_detections_task.cancel()
+            try:
+                await self.send_detections_task
+            except asyncio.CancelledError:
+                pass
+        
+        self.is_connected = False
+        logger.info(f"Detections WebSocket disconnected: client {self.client_id}")
+    
+    async def _send_detections_loop(self):
+        """Send detection data at regular intervals"""
+        try:
+            detection_interval = 0.1  # 10 Hz
+            
+            while self.is_connected:
+                try:
+                    camera_status = camera_manager.get_camera_status(self.camera_id)
+                    processing_active = camera_status.get('active', False)
+                    
+                    if processing_active:
+                        frame_data = camera_manager.get_latest_frame(self.camera_id)
+                        
+                        # Skip if same frame
+                        if frame_data.get('frame_id', 0) == self.last_frame_id:
+                            await asyncio.sleep(detection_interval)
+                            continue
+                        
+                        detections = frame_data.get('detections', [])
+                        process_time = frame_data.get('process_time', 0)
+                        frame_id = frame_data.get('frame_id', 0)
+                        self.last_frame_id = frame_id
+                        
+                        # Convert to serializable format
+                        detections = convert_to_serializable(detections)
+                        
+                        response = {
+                            "type": "detections",
+                            "processing_active": True,
+                            "detections": detections,
+                            "timestamp": time.time(),
+                            "frame_id": frame_id,
+                            "stats": {
+                                "process_time_ms": round(process_time * 1000, 2),
+                                "fps": round(1.0 / max(0.001, time.time() - self.last_frame_time), 1) if self.last_frame_time > 0 else 0,
+                                "active_tracks": len(detections)
+                            }
+                        }
+                        
+                        await self.send(text_data=json.dumps(response, cls=UUIDEncoder))
+                        self.last_frame_time = time.time()
+                    
+                    await asyncio.sleep(detection_interval)
+                    
+                except Exception as e:
+                    logger.error(f"Error in detection loop: {e}")
+                    await asyncio.sleep(0.5)
+        
+        except asyncio.CancelledError:
+            logger.info(f"Detection loop cancelled for client {self.client_id}")
+    
+    async def receive(self, text_data):
+        """Handle incoming WebSocket messages"""
+        try:
+            data = json.loads(text_data)
+            command = data.get('command')
+            
+            if command == 'check_status':
+                camera_status = camera_manager.get_camera_status(self.camera_id)
+                camera_status = convert_to_serializable(camera_status)
+                
+                await self.send(text_data=json.dumps({
+                    "type": "status_update",
+                    "camera_id": str(self.camera_id),
+                    "status": camera_status,
+                    "timestamp": time.time()
+                }, cls=UUIDEncoder))
+            else:
+                await self.send(text_data=json.dumps({
+                    "type": "error",
+                    "message": f"Unknown command: {command}",
+                    "timestamp": time.time()
+                }, cls=UUIDEncoder))
+        
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({
+                "type": "error",
+                "message": "Invalid JSON format",
+                "timestamp": time.time()
+            }, cls=UUIDEncoder))
+        except Exception as e:
+            logger.error(f"Error handling message: {e}")
 
 
 class AlertsConsumer(AsyncWebsocketConsumer):

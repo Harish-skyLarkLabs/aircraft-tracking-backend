@@ -473,7 +473,7 @@ class PTZController:
         - > 120K: Zoom out 2x
         """
         if not self.enable_zoom_control:
-            logger.debug("[ZOOM DISABLED] Zoom control is disabled")
+            logger.debug("[ZOOM DISABLED] Zoom controlpp is disabled")
             return False
             
         if aircraft_width is None or aircraft_height is None:

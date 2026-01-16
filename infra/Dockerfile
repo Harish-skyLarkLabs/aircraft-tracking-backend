@@ -1,4 +1,4 @@
-FROM python:3.10-slim-buster AS base
+FROM python:3.10-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -18,10 +18,10 @@ RUN apt-get -y update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
-FROM base as build-image
+FROM base AS build-image
 
 RUN apt-get -y update && apt-get install -y --no-install-recommends \
-    libpq-dev ffmpeg libsm6 libxext6 graphviz graphviz-dev make curl coreutils netcat
+    libpq-dev ffmpeg libsm6 libxext6 graphviz graphviz-dev make curl coreutils netcat-openbsd
 
 COPY --from=compile-image /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
@@ -71,4 +71,3 @@ ENV DB_PORT=5432
 ENV DB_NAME=aircraft_tracking
 ENV DB_USER=postgres
 ENV DB_PASSWORD=postgres
-

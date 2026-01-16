@@ -1,0 +1,80 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+local_settings.py
+
+# Static and media (will be generated in container)
+static/
+media/
+
+# Detection images (will be mounted as volume)
+detection_images/
+
+# Documentation
+*.md
+README.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# MinIO data
+infra/data/
+
+# Temporary files
+*.tmp
+*.temp
+
+

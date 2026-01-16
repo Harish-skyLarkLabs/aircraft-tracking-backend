@@ -166,7 +166,7 @@ CELERY_TIMEZONE = TIME_ZONE
 # ML Models Configuration
 # Aircraft.pt - Custom YOLO model from ML team
 ML_MODELS = {
-    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'models', 'Aircraft.pt'),
+    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'models', 'aircraft_new_jun22.pt'),
 }
 
 # Aircraft Detection Settings (matching inference.py)

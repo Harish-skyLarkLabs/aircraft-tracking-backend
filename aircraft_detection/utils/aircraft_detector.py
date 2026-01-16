@@ -13,7 +13,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 # Default model path - Aircraft.pt 
-DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'models' / 'Aircraft.pt'
+DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'models' / 'aircraft_new_jun22.pt'
 
 # Detection thresholds 
 CONFIDENCE_THRESHOLD = 0.25
@@ -21,7 +21,7 @@ IOU_THRESHOLD = 0.45
 
 
 class AircraftDetector:
-    """YOLO-based aircraft detector using custom Aircraft.pt model"""
+    """YOLO-based aircraft detector using custom aircraft_new_jun22.pt model"""
     
     def __init__(
         self,

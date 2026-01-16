@@ -8,13 +8,24 @@ class CamerasConfig(AppConfig):
     def ready(self):
         """Initialize MinIO storage when the app is ready."""
         import os
-        # Only run in the main process, not in migrations or shell
-        if os.environ.get('RUN_MAIN') == 'true' or os.environ.get('INIT_MINIO') == 'true':
-            try:
-                from backend.storage import initialize_minio
-                initialize_minio()
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Could not initialize MinIO on startup: {e}")
+        import sys
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Skip initialization during migrations
+        if 'migrate' in sys.argv or 'makemigrations' in sys.argv:
+            return
+        
+        # Initialize MinIO bucket on startup (for both dev and production)
+        try:
+            from backend.storage import initialize_minio
+            logger.info("Initializing MinIO bucket...")
+            success = initialize_minio()
+            if success:
+                logger.info("✓ MinIO bucket initialized successfully")
+            else:
+                logger.warning("✗ MinIO bucket initialization failed")
+        except Exception as e:
+            logger.error(f"✗ Error initializing MinIO on startup: {e}", exc_info=True)
 

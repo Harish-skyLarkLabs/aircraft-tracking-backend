@@ -251,14 +251,39 @@ class CameraViewSet(viewsets.ModelViewSet):
             )
 
     def destroy(self, request, *args, **kwargs):
-        """Override destroy to stop processing before deletion."""
+        """Override destroy to stop processing and cleanup all data before deletion."""
         instance = self.get_object()
+        camera_id = str(instance.camera_id)
 
+        # 1. Stop AI processing if enabled
         if instance.ai_enabled:
             try:
                 from aircraft_detection.utils.camera_manager import camera_manager
                 camera_manager.stop_camera_processing(instance.camera_id)
+                logger.info(f"Stopped AI processing for camera {camera_id}")
             except ImportError:
-                pass
+                logger.warning("Camera manager not available during camera deletion")
 
+        # 2. Delete all detection records from database
+        try:
+            from aircraft_detection.models import AircraftDetection
+            detection_count = AircraftDetection.objects.filter(camera_id=camera_id).count()
+            deleted_detections = AircraftDetection.objects.filter(camera_id=camera_id).delete()
+            logger.info(f"Deleted {detection_count} detection records for camera {camera_id}")
+        except Exception as e:
+            logger.error(f"Error deleting detection records for camera {camera_id}: {e}")
+
+        # 3. Delete all files from MinIO (thumbnails, alert images, videos)
+        try:
+            from backend.storage import minio_storage
+            success = minio_storage.delete_camera_files(camera_id)
+            if success:
+                logger.info(f"Deleted all MinIO files for camera {camera_id}")
+            else:
+                logger.warning(f"Some files may not have been deleted from MinIO for camera {camera_id}")
+        except Exception as e:
+            logger.error(f"Error deleting MinIO files for camera {camera_id}: {e}")
+
+        # 4. Delete the camera record
+        logger.info(f"Deleting camera {camera_id} - {instance.name}")
         return super().destroy(request, *args, **kwargs)

@@ -13,7 +13,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 # Default model path - Aircraft.pt from ML team
-DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'Aircraft.pt'
+DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'models' / 'Aircraft.pt'
 
 # Detection thresholds matching inference.py
 CONFIDENCE_THRESHOLD = 0.25

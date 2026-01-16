@@ -56,9 +56,13 @@ class MinIOStorage:
         Returns True if successful.
         """
         try:
-            if not self._client.bucket_exists(self.bucket_name):
+            bucket_exists = self._client.bucket_exists(self.bucket_name)
+            logger.info(f"Checking bucket '{self.bucket_name}': exists={bucket_exists}")
+            
+            if not bucket_exists:
+                logger.info(f"Creating bucket: {self.bucket_name}")
                 self._client.make_bucket(self.bucket_name)
-                logger.info(f"Created bucket: {self.bucket_name}")
+                logger.info(f"✓ Created bucket: {self.bucket_name}")
                 
                 # Set public read policy
                 policy = {
@@ -74,12 +78,15 @@ class MinIOStorage:
                 }
                 import json
                 self._client.set_bucket_policy(self.bucket_name, json.dumps(policy))
-                logger.info(f"Set public read policy for bucket: {self.bucket_name}")
+                logger.info(f"✓ Set public read policy for bucket: {self.bucket_name}")
             else:
-                logger.info(f"Bucket already exists: {self.bucket_name}")
+                logger.info(f"✓ Bucket already exists: {self.bucket_name}")
             return True
         except S3Error as e:
-            logger.error(f"Failed to initialize bucket: {e}")
+            logger.error(f"✗ S3 Error initializing bucket '{self.bucket_name}': {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"✗ Unexpected error initializing bucket '{self.bucket_name}': {e}", exc_info=True)
             return False
     
     def _get_object_path(self, camera_id: str, folder: str, filename: str) -> str:
@@ -299,14 +306,26 @@ minio_storage = MinIOStorage()
 
 def initialize_minio():
     """Initialize MinIO bucket on application startup."""
+    logger.info("=" * 60)
+    logger.info("Starting MinIO initialization...")
+    logger.info(f"MinIO Endpoint: {settings.MINIO_ENDPOINT}")
+    logger.info(f"Bucket Name: {settings.MINIO_BUCKET_NAME}")
+    logger.info("=" * 60)
+    
     try:
         success = minio_storage.initialize_bucket()
         if success:
-            logger.info("MinIO storage initialized successfully")
+            logger.info("=" * 60)
+            logger.info("✓ MinIO storage initialized successfully")
+            logger.info("=" * 60)
         else:
-            logger.error("Failed to initialize MinIO storage")
+            logger.error("=" * 60)
+            logger.error("✗ Failed to initialize MinIO storage")
+            logger.error("=" * 60)
         return success
     except Exception as e:
-        logger.error(f"Error initializing MinIO: {e}")
+        logger.error("=" * 60)
+        logger.error(f"✗ Error initializing MinIO: {e}", exc_info=True)
+        logger.error("=" * 60)
         return False
 

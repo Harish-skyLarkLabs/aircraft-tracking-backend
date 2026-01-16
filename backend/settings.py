@@ -166,16 +166,16 @@ CELERY_TIMEZONE = TIME_ZONE
 # ML Models Configuration
 # Aircraft.pt - Custom YOLO model from ML team
 ML_MODELS = {
-    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'Aircraft.pt'),
+    'AIRCRAFT_DETECTION': os.path.join(BASE_DIR, 'models', 'Aircraft.pt'),
 }
 
 # Aircraft Detection Settings (matching inference.py)
 AIRCRAFT_DETECTION_SETTINGS = {
-    'MAX_FPS': 15,
+    'MAX_FPS': 20,
     'FRAME_BUFFER_SIZE': 3,
     'DEBUG_VISUALIZATION': True,
-    'CONFIDENCE_THRESHOLD': 0.25,  # From inference.py
-    'IOU_THRESHOLD': 0.45,         # From inference.py
+    'CONFIDENCE_THRESHOLD': 0.25,  
+    'IOU_THRESHOLD': 0.45,         
 }
 
 # Detection Classes for Aircraft (from Aircraft.pt model)
@@ -187,13 +187,10 @@ AIRCRAFT_CLASSES = {
 ALERT_TYPES = {
     'LANDING': 'landing',
     'TAKEOFF': 'takeoff',
-    # 'TAXIING': 'taxiing',
-    # 'PARKED': 'parked',
-    # 'INTRUSION': 'intrusion',
 }
 
 # MinIO Object Storage Configuration
-MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'localhost:9000')
+MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'localhost:9004')
 MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
 MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
 MINIO_SECURE = os.getenv('MINIO_SECURE', 'False').lower() == 'true'

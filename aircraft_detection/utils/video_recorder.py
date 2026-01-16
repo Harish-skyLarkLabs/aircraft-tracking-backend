@@ -286,10 +286,21 @@ class VideoRecorder:
         """Save a completed recording and create alert with all media"""
         from backend.storage import minio_storage
         from aircraft_detection.models import AircraftDetection
+        from cameras.models import Camera
         from django.utils import timezone
         
         if not session.frames:
             logger.warning(f"No frames to save for track {session.track_id}")
+            return
+        
+        # Verify camera still has AI enabled before creating alert
+        try:
+            camera = Camera.objects.get(camera_id=session.camera_id)
+            if not camera.ai_enabled:
+                logger.info(f"Skipping alert creation for camera {session.camera_id} - AI is now disabled")
+                return
+        except Camera.DoesNotExist:
+            logger.warning(f"Camera {session.camera_id} no longer exists, skipping alert creation")
             return
         
         video_path = None
@@ -476,22 +487,51 @@ class VideoRecorder:
             logger.error(f"Failed to broadcast alert: {e}")
     
     def cleanup_camera(self, camera_id: str):
-        """Clean up all data for a camera"""
+        """Clean up all data for a camera and cancel pending recordings"""
         with self.lock:
+            # 1. Clear pre-roll buffers
             if camera_id in self.pre_roll_buffers:
                 self.pre_roll_buffers[camera_id].clear()
                 del self.pre_roll_buffers[camera_id]
+            
+            # 2. Cancel active recording sessions (don't save them)
+            session_count = 0
             if camera_id in self.active_sessions:
-                # Clear frame data before deleting
+                session_count = len(self.active_sessions[camera_id])
+                # Clear frame data before deleting to free memory
                 for session in self.active_sessions[camera_id].values():
                     session.frames = []
                     session.initial_frame = None
                     session.final_frame = None
                 del self.active_sessions[camera_id]
+                logger.info(f"Cancelled {session_count} active recording sessions for camera {camera_id}")
+            
+            # 3. Remove from frame counters
             if camera_id in self.frame_counters:
                 del self.frame_counters[camera_id]
+            
+            # 4. Remove any pending sessions from processing queue for this camera
+            original_queue_size = len(self.processing_queue)
+            new_queue = []
+            removed_count = 0
+            
+            for session in self.processing_queue:
+                if session.camera_id == camera_id:
+                    # Clear frame data to free memory
+                    session.frames = []
+                    session.initial_frame = None
+                    session.final_frame = None
+                    removed_count += 1
+                else:
+                    new_queue.append(session)
+            
+            self.processing_queue = new_queue
+            
+            if removed_count > 0:
+                logger.info(f"Removed {removed_count} pending recordings from queue for camera {camera_id}")
         
-        logger.info(f"Cleaned up video recorder for camera {camera_id}")
+        logger.info(f"✓ Fully cleaned up video recorder for camera {camera_id} "
+                   f"({session_count} active + {removed_count} queued sessions cancelled)")
     
     def shutdown(self):
         """Shutdown the video recorder"""

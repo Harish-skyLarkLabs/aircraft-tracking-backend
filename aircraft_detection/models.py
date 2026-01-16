@@ -82,8 +82,10 @@ class AircraftDetection(models.Model):
     # MinIO Storage Paths (stores object path, not full URL)
     # Structure: cameras/{camera_id}/alerts/{detection_id}.jpg
     # Structure: cameras/{camera_id}/videos/{detection_id}.mp4
+    # Structure: cameras/{camera_id}/videos/{detection_id}_crop.mp4
     image_path = models.CharField(max_length=500, blank=True, null=True)
     video_path = models.CharField(max_length=500, blank=True, null=True)
+    crop_video_path = models.CharField(max_length=500, blank=True, null=True, help_text="Path to cropped/zoomed aircraft video")
     
     # Bounding box
     bbox_x1 = models.IntegerField(default=0)
@@ -167,6 +169,26 @@ class AircraftDetection(models.Model):
             except Exception:
                 return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.video_path}"
         return None
+    
+    @property
+    def crop_video_url(self) -> str | None:
+        """Get a presigned URL for the cropped/zoomed aircraft video."""
+        if self.crop_video_path:
+            try:
+                from backend.storage import minio_storage
+                from datetime import timedelta
+                # Use presigned URL for videos (larger files, need auth)
+                presigned = minio_storage.get_presigned_url(
+                    self.crop_video_path, 
+                    expires=timedelta(hours=24)
+                )
+                if presigned:
+                    return presigned
+                # Fallback to public URL
+                return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.crop_video_path}"
+            except Exception:
+                return f"{settings.MINIO_PUBLIC_URL}/{settings.MINIO_BUCKET_NAME}/{self.crop_video_path}"
+        return None
 
 
 @receiver(models.signals.post_delete, sender=AircraftDetection)
@@ -179,6 +201,8 @@ def post_delete_detection(sender, instance, *args, **kwargs):
             minio_storage.delete_file(instance.image_path)
         if instance.video_path:
             minio_storage.delete_file(instance.video_path)
+        if instance.crop_video_path:
+            minio_storage.delete_file(instance.crop_video_path)
     except Exception as e:
         logger.warning(f"Failed to delete MinIO files for detection {instance.detection_id}: {e}")
 

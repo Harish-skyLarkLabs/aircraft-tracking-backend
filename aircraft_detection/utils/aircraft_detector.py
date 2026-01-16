@@ -12,10 +12,10 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-# Default model path - Aircraft.pt from ML team
+# Default model path - Aircraft.pt 
 DEFAULT_MODEL_PATH = Path(settings.BASE_DIR) / 'models' / 'Aircraft.pt'
 
-# Detection thresholds matching inference.py
+# Detection thresholds 
 CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.45
 
@@ -117,6 +117,7 @@ class AircraftDetector:
                 conf=self.confidence_threshold,
                 iou=self.iou_threshold,
                 verbose=False,
+                imgsz=1280,
             )
             
             detections = []
@@ -180,18 +181,10 @@ class AircraftDetector:
             )
             
             detections = []
+            # Don't draw anything - keep frame clean, we'll draw only PTZ-locked aircraft in frame_processor
             annotated_frame = frame.copy()
             
             for result in results:
-                # Get annotated frame using ultralytics plot method
-                # Same as inference.py
-                annotated_frame = result.plot(
-                    conf=True,      # Show confidence scores
-                    labels=True,    # Show class labels
-                    boxes=True,     # Show bounding boxes
-                    line_width=2    # Box line width
-                )
-                
                 boxes = result.boxes
                 
                 for box in boxes:

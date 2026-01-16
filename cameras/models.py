@@ -1,5 +1,5 @@
 """
-Camera models for Aircraft Tracking
+Camera models for Aircraft Tracking with PTZ support
 """
 from django.db import models
 from django.dispatch import receiver
@@ -11,12 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class Camera(models.Model):
-    """Model for camera devices"""
+    """Model for camera devices with PTZ support"""
     CAMERA_TYPE_CHOICES = (
         ('ip', 'IP Camera'),
         ('rtsp', 'RTSP Stream'),
         ('usb', 'USB Camera'),
         ('file', 'Video File'),
+        ('ptz', 'PTZ Camera'),
     )
 
     camera_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -44,6 +45,28 @@ class Camera(models.Model):
     resolution_height = models.IntegerField(default=1080, blank=True, null=True)
     fps = models.IntegerField(default=30, blank=True, null=True)
     
+    # PTZ Configuration
+    ptz_enabled = models.BooleanField(default=False, help_text="Whether PTZ control is enabled for this camera")
+    ptz_ip = models.CharField(max_length=100, blank=True, null=True, help_text="PTZ camera IP address (if different from RTSP)")
+    ptz_username = models.CharField(max_length=100, blank=True, null=True, help_text="PTZ camera username")
+    ptz_password = models.CharField(max_length=100, blank=True, null=True, help_text="PTZ camera password")
+    ptz_channel = models.IntegerField(default=1, help_text="PTZ channel number")
+    ptz_preset_number = models.IntegerField(default=20, help_text="Default preset position number")
+    
+    # PTZ Tracking Settings
+    ptz_tracking_enabled = models.BooleanField(default=True, help_text="Whether PTZ auto-tracking is enabled")
+    ptz_zoom_enabled = models.BooleanField(default=True, help_text="Whether PTZ zoom control is enabled")
+    ptz_zoom_in_enabled = models.BooleanField(default=True, help_text="Whether zoom in is enabled")
+    ptz_zoom_out_enabled = models.BooleanField(default=True, help_text="Whether zoom out is enabled")
+    
+    # Tracking Settings
+    tracking_lock_only_mode = models.BooleanField(default=True, help_text="Only track currently locked aircraft")
+    tracking_min_consecutive_detections = models.IntegerField(default=5, help_text="Minimum detections before PTZ tracking")
+    tracking_enable_size_filter = models.BooleanField(default=True, help_text="Filter out small aircraft")
+    tracking_min_aircraft_width = models.IntegerField(default=10, help_text="Minimum aircraft width in pixels")
+    tracking_enable_edge_filtering = models.BooleanField(default=True, help_text="Filter aircraft at frame edges")
+    tracking_edge_margin_percent = models.FloatField(default=7.0, help_text="Edge margin as percentage of frame")
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -67,6 +90,51 @@ class Camera(models.Model):
         backend_url = getattr(settings, 'BACKEND_PUBLIC_URL', 'http://localhost:8000')
         ws_url = backend_url.replace('http://', 'ws://').replace('https://', 'wss://')
         return f"{ws_url}/ws/video-feed/{self.camera_id}/"
+    
+    @property
+    def ptz_config(self) -> dict:
+        """Get PTZ configuration as dictionary."""
+        return {
+            'enabled': self.ptz_enabled,
+            'ip': self.ptz_ip,
+            'username': self.ptz_username,
+            'password': self.ptz_password,
+            'channel': self.ptz_channel,
+            'preset_number': self.ptz_preset_number,
+            'tracking_enabled': self.ptz_tracking_enabled,
+            'zoom_enabled': self.ptz_zoom_enabled,
+            'zoom_in_enabled': self.ptz_zoom_in_enabled,
+            'zoom_out_enabled': self.ptz_zoom_out_enabled,
+        }
+    
+    @property
+    def tracking_config(self) -> dict:
+        """Get tracking configuration as dictionary."""
+        return {
+            'lock_only_mode': self.tracking_lock_only_mode,
+            'min_consecutive_detections': self.tracking_min_consecutive_detections,
+            'enable_size_filter': self.tracking_enable_size_filter,
+            'min_aircraft_width': self.tracking_min_aircraft_width,
+            'enable_edge_filtering': self.tracking_enable_edge_filtering,
+            'edge_margin_percent': self.tracking_edge_margin_percent,
+        }
+    
+    def get_ptz_ip(self) -> str | None:
+        """Get PTZ IP address, extracting from RTSP link if not specified."""
+        if self.ptz_ip:
+            return self.ptz_ip
+        
+        # Try to extract from RTSP link
+        # Format: rtsp://username:password@ip_address/...
+        try:
+            import re
+            match = re.search(r'@([\d.]+)', self.rtsp_link)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+        
+        return None
 
 
 @receiver(models.signals.post_delete, sender=Camera)

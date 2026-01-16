@@ -10,6 +10,7 @@ class AircraftDetectionSerializer(serializers.ModelSerializer):
     bbox = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
     video_url = serializers.SerializerMethodField()
+    crop_video_url = serializers.SerializerMethodField()
 
     class Meta:
         model = AircraftDetection
@@ -20,10 +21,11 @@ class AircraftDetectionSerializer(serializers.ModelSerializer):
             'severity', 'status', 'is_read', 'title', 'description',
             'camera_id', 'camera_name',
             'image_path', 'image_url', 'video_path', 'video_url',
+            'crop_video_path', 'crop_video_url',
             'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'bbox',
             'metadata', 'detection_time', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['detection_id', 'created_at', 'updated_at', 'image_url', 'video_url']
+        read_only_fields = ['detection_id', 'created_at', 'updated_at', 'image_url', 'video_url', 'crop_video_url']
 
     def get_bbox(self, obj):
         return [obj.bbox_x1, obj.bbox_y1, obj.bbox_x2, obj.bbox_y2]
@@ -35,12 +37,17 @@ class AircraftDetectionSerializer(serializers.ModelSerializer):
     def get_video_url(self, obj) -> str | None:
         """Get the full MinIO URL for the detection video."""
         return obj.video_url
+    
+    def get_crop_video_url(self, obj) -> str | None:
+        """Get the full MinIO URL for the cropped aircraft video."""
+        return obj.crop_video_url
 
 
 class AircraftDetectionListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views"""
     image_url = serializers.SerializerMethodField()
     video_url = serializers.SerializerMethodField()
+    crop_video_url = serializers.SerializerMethodField()
 
     class Meta:
         model = AircraftDetection
@@ -48,6 +55,7 @@ class AircraftDetectionListSerializer(serializers.ModelSerializer):
             'detection_id', 'detection_type', 'action', 'confidence',
             'title', 'severity', 'status', 'is_read', 'camera_id', 'camera_name',
             'detection_time', 'image_path', 'image_url', 'video_path', 'video_url',
+            'crop_video_path', 'crop_video_url',
             'flight_number', 'aircraft_type'
         ]
 
@@ -58,6 +66,10 @@ class AircraftDetectionListSerializer(serializers.ModelSerializer):
     def get_video_url(self, obj) -> str | None:
         """Get the full MinIO URL for the detection video."""
         return obj.video_url
+    
+    def get_crop_video_url(self, obj) -> str | None:
+        """Get the full MinIO URL for the cropped aircraft video."""
+        return obj.crop_video_url
 
 
 class AircraftDetectionCreateSerializer(serializers.ModelSerializer):

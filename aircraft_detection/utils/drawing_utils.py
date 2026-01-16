@@ -130,7 +130,7 @@ def draw_aircraft_detection(
         'parked': (128, 128, 128),   # Gray
         'flying': (255, 0, 0),       # Blue
         'hovering': (255, 0, 255),   # Magenta
-        'unknown': (0, 255, 255),    # Yellow
+        'unknown': (0, 0, 0),    # Yellow
     }
     
     color = action_colors.get(action, (0, 255, 255))

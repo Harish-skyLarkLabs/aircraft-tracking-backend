@@ -49,8 +49,30 @@ class UUIDEncoder(json.JSONEncoder):
 def encode_frame_to_base64(frame: np.ndarray, quality: int = 70) -> str:
     """Encode a frame as base64 JPEG for websocket transmission"""
     try:
+        # Validate frame is a proper numpy array
+        if frame is None:
+            logger.warning("Frame is None, cannot encode")
+            return None
+        
+        if not isinstance(frame, np.ndarray):
+            logger.warning(f"Frame is not a numpy array, got {type(frame)}")
+            return None
+        
+        if frame.size == 0 or len(frame.shape) < 2:
+            logger.warning(f"Invalid frame shape: {frame.shape if hasattr(frame, 'shape') else 'unknown'}")
+            return None
+        
+        # Ensure frame is uint8
+        if frame.dtype != np.uint8:
+            frame = frame.astype(np.uint8)
+        
         encode_param = [cv2.IMWRITE_JPEG_QUALITY, quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
-        _, buffer = cv2.imencode('.jpg', frame, encode_param)
+        success, buffer = cv2.imencode('.jpg', frame, encode_param)
+        
+        if not success:
+            logger.warning("cv2.imencode returned False")
+            return None
+        
         frame_base64 = base64.b64encode(buffer).decode('utf-8')
         return f"data:image/jpeg;base64,{frame_base64}"
     except Exception as e:
@@ -227,8 +249,10 @@ class VideoFeedConsumer(AsyncWebsocketConsumer):
                         self._start_direct_stream()
                     
                     if self.direct_stream:
-                        frame = self.direct_stream.get_frame()
-                        if frame is not None:
+                        # get_frame returns (success, frame) tuple
+                        ret, raw_frame = self.direct_stream.get_frame()
+                        if ret and raw_frame is not None:
+                            frame = raw_frame
                             direct_frame_id += 1
                             frame_id = direct_frame_id
                         else:

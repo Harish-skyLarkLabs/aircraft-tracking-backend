@@ -20,3 +20,4 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR('✗ Failed to initialize MinIO bucket'))
             self.stdout.write(self.style.WARNING('Please check your MinIO configuration in settings.py'))
 
+

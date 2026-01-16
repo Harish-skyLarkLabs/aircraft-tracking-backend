@@ -184,7 +184,8 @@ class MinIOStorage:
         self,
         camera_id: str,
         alert_id: str,
-        video_bytes: Union[bytes, BinaryIO]
+        video_bytes: Union[bytes, BinaryIO],
+        suffix: str = ""
     ) -> Optional[str]:
         """
         Upload alert video recording.
@@ -193,6 +194,7 @@ class MinIOStorage:
             camera_id: Camera UUID
             alert_id: Alert/Detection UUID
             video_bytes: MP4 video bytes or file object
+            suffix: Optional suffix for filename (e.g., "_crop" for cropped video)
             
         Returns:
             Object path if successful
@@ -200,7 +202,7 @@ class MinIOStorage:
         return self.upload_file(
             camera_id=str(camera_id),
             folder="videos",
-            filename=f"{alert_id}.mp4",
+            filename=f"{alert_id}{suffix}.mp4",
             data=video_bytes,
             content_type="video/mp4"
         )

@@ -84,3 +84,9 @@ EXPOSE $PORT
 # Default command - start the application
 CMD ["/start.sh"]
 
+
+
+
+
+
+

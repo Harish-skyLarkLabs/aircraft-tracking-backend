@@ -24,6 +24,7 @@ class CameraSerializer(serializers.ModelSerializer):
             # PTZ fields
             'ptz_enabled', 'ptz_ip', 'ptz_username', 'ptz_channel', 'ptz_preset_number',
             'ptz_tracking_enabled', 'ptz_zoom_enabled', 'ptz_zoom_in_enabled', 'ptz_zoom_out_enabled',
+            'ptz_zoom_config',
             # Tracking fields
             'tracking_lock_only_mode', 'tracking_min_consecutive_detections',
             'tracking_enable_size_filter', 'tracking_min_aircraft_width',
@@ -75,6 +76,7 @@ class CameraCreateSerializer(serializers.ModelSerializer):
             'ptz_channel', 'ptz_preset_number',
             'ptz_tracking_enabled', 'ptz_zoom_enabled',
             'ptz_zoom_in_enabled', 'ptz_zoom_out_enabled',
+            'ptz_zoom_config',
             # Tracking fields
             'tracking_lock_only_mode', 'tracking_min_consecutive_detections',
             'tracking_enable_size_filter', 'tracking_min_aircraft_width',
@@ -127,6 +129,7 @@ class CameraUpdateSerializer(serializers.ModelSerializer):
             'ptz_channel', 'ptz_preset_number',
             'ptz_tracking_enabled', 'ptz_zoom_enabled',
             'ptz_zoom_in_enabled', 'ptz_zoom_out_enabled',
+            'ptz_zoom_config',
             # Tracking fields
             'tracking_lock_only_mode', 'tracking_min_consecutive_detections',
             'tracking_enable_size_filter', 'tracking_min_aircraft_width',

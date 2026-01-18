@@ -67,6 +67,14 @@ class Camera(models.Model):
     tracking_enable_edge_filtering = models.BooleanField(default=True, help_text="Filter aircraft at frame edges")
     tracking_edge_margin_percent = models.FloatField(default=7.0, help_text="Edge margin as percentage of frame")
     
+    # PTZ Zoom Configuration (Area-based zoom control)
+    ptz_zoom_config = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text="Array of zoom rules: [{min_area, max_area, action, duration, speed, label}]"
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -105,7 +113,24 @@ class Camera(models.Model):
             'zoom_enabled': self.ptz_zoom_enabled,
             'zoom_in_enabled': self.ptz_zoom_in_enabled,
             'zoom_out_enabled': self.ptz_zoom_out_enabled,
+            'zoom_config': self.ptz_zoom_config or self.get_default_zoom_config(),
         }
+    
+    @staticmethod
+    def get_default_zoom_config() -> list:
+        """Get default zoom configuration based on aircraft area."""
+        return [
+            {"min_area": 0, "max_area": 10000, "action": "NONE", "duration": 0, "speed": 0, "label": "No zoom - area < 10K"},
+            {"min_area": 10000, "max_area": 20000, "action": "ZOOM_OUT", "duration": 0.8, "speed": 7, "label": "Very Initial 10K-20K"},
+            {"min_area": 20000, "max_area": 30000, "action": "ZOOM_OUT", "duration": 0.8, "speed": 7, "label": "Early 20K-30K"},
+            {"min_area": 30000, "max_area": 40000, "action": "ZOOM_OUT", "duration": 0.6, "speed": 6, "label": "Initial 30K-40K"},
+            {"min_area": 40000, "max_area": 60000, "action": "ZOOM_OUT", "duration": 0.6, "speed": 6, "label": "Moderate 40K-60K"},
+            {"min_area": 60000, "max_area": 75000, "action": "ZOOM_OUT", "duration": 0.10, "speed": 8, "label": "Heavy 60K-75K"},
+            {"min_area": 75000, "max_area": 85000, "action": "ZOOM_OUT", "duration": 0.10, "speed": 8, "label": "Aggressive 75K-85K"},
+            {"min_area": 85000, "max_area": 95000, "action": "ZOOM_OUT", "duration": 0.5, "speed": 6, "label": "Large 85K-95K"},
+            {"min_area": 95000, "max_area": 120000, "action": "ZOOM_OUT", "duration": 0.5, "speed": 6, "label": "Very Large 95K-120K"},
+            {"min_area": 120000, "max_area": 999999, "action": "ZOOM_OUT", "duration": 0.5, "speed": 6, "label": "Extreme Size > 120K"},
+        ]
     
     @property
     def tracking_config(self) -> dict:

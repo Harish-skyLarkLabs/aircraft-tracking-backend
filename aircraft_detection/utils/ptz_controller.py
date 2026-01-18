@@ -413,6 +413,7 @@ class PTZController:
     def ptz_control(self, action: str, speed: int = 7, duration: float = 0.05) -> bool:
         """Non-blocking PTZ control with automatic STOP"""
         try:
+            print(f"PTZ control: {action}, {speed}, {duration}")
             if self.command_queue.qsize() < 2:
                 command = PTZCommand(action, speed, duration)
                 self.command_queue.put(command, block=False)
@@ -473,7 +474,7 @@ class PTZController:
         - > 120K: Zoom out 2x
         """
         if not self.enable_zoom_control:
-            logger.debug("[ZOOM DISABLED] Zoom controlpp is disabled")
+            logger.debug("[ZOOM DISABLED] Zoom control is disabled")
             return False
             
         if aircraft_width is None or aircraft_height is None:
@@ -578,6 +579,7 @@ class PTZController:
                 return False
         
         else:
+            print(f"No zoom action found>>>>>>>")
             return False
         
         # Execute zoom action

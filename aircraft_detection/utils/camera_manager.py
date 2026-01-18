@@ -44,6 +44,9 @@ class CameraSystem:
         ptz_preset_number: int = 20,
         enable_ptz_tracking: bool = True,
         enable_zoom_control: bool = True,
+        enable_zoom_in: bool = True,
+        enable_zoom_out: bool = True,
+        # ptz_zoom_config: Optional[list] = None,
         # Processing settings
         enable_recording: bool = True,
         debug_visualization: bool = True,
@@ -64,6 +67,8 @@ class CameraSystem:
             ptz_preset_number: Default preset position
             enable_ptz_tracking: Enable PTZ tracking
             enable_zoom_control: Enable zoom control
+            enable_zoom_in: Enable zoom in
+            enable_zoom_out: Enable zoom out
             enable_recording: Enable video recording
             debug_visualization: Enable debug overlays
         """
@@ -85,7 +90,10 @@ class CameraSystem:
                 channel=ptz_channel,
                 enable_ptz_tracking=enable_ptz_tracking,
                 enable_zoom_control=enable_zoom_control,
+                enable_zoom_in=enable_zoom_in,
+                enable_zoom_out=enable_zoom_out,
                 preset_number=ptz_preset_number,
+                # zoom_config=ptz_zoom_config,
             )
             if not self.ptz_controller.connect():
                 logger.warning(f"Failed to connect PTZ controller for camera {camera_id}")
@@ -218,6 +226,9 @@ class CameraManager:
         ptz_preset_number: int = 20,
         enable_ptz_tracking: bool = True,
         enable_zoom_control: bool = True,
+        enable_zoom_in: bool = True,
+        enable_zoom_out: bool = True,
+        # ptz_zoom_config: Optional[list] = None,
     ) -> bool:
         """
         Start processing for a camera with optional PTZ support
@@ -235,6 +246,8 @@ class CameraManager:
             ptz_preset_number: Default preset position
             enable_ptz_tracking: Enable PTZ tracking
             enable_zoom_control: Enable zoom control
+            enable_zoom_in: Enable zoom in
+            enable_zoom_out: Enable zoom out
             
         Returns:
             bool: True if started successfully
@@ -262,6 +275,9 @@ class CameraManager:
                     ptz_preset_number=ptz_preset_number,
                     enable_ptz_tracking=enable_ptz_tracking,
                     enable_zoom_control=enable_zoom_control,
+                    enable_zoom_in=enable_zoom_in,
+                    enable_zoom_out=enable_zoom_out,
+                    # ptz_zoom_config=ptz_zoom_config,
                 )
                 
                 if not camera_system.start():

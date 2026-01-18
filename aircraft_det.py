@@ -63,9 +63,9 @@ PTZ_TRACKING = True  # Set to False to disable all PTZ movement tracking
 #__-----------------------------------------------------------------------------------------
 # Camera configuration
 CAMERA_CONFIG_1 = {
-    'ip': '192.168.1.150',
+    'ip': '192.168.1.106',
     'username': 'admin',
-    'password': 'admin123',
+    'password': 'skylark123',
     'name': 'Camera 1 (150)'
 }
 

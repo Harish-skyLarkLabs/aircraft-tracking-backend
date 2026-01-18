@@ -14,7 +14,7 @@ Includes:
 """
 
 from .aircraft_detector import AircraftDetector, get_detector
-from .tracker import AircraftTracker, IOUTracker, TrackedAircraft, calculate_iou, calculate_distance
+from .tracker import AircraftTracker, TrackedAircraft, calculate_iou, calculate_distance
 from .ptz_controller import PTZController, get_ptz_controller, remove_ptz_controller, get_all_ptz_status
 from .alert_service import AlertService, get_alert_service
 from .video_recorder import VideoRecorder, get_video_recorder
@@ -28,7 +28,6 @@ __all__ = [
     'get_detector',
     # Tracker
     'AircraftTracker',
-    'IOUTracker',
     'TrackedAircraft',
     'calculate_iou',
     'calculate_distance',

@@ -45,7 +45,7 @@ class AircraftDetector:
         self.device = self._get_device(device)
         self.class_names = {}  # Will be populated from model
         
-        # Use provided path or default to Aircraft.pt
+        
         if model_path is None:
             model_path = str(DEFAULT_MODEL_PATH)
         
@@ -159,7 +159,7 @@ class AircraftDetector:
         roi_points: Optional[List[List[int]]] = None,
     ) -> Tuple[np.ndarray, List[Dict]]:
         """
-        Detect aircraft and return annotated frame (like inference.py)
+        Detect aircraft and return annotated frame 
         
         Args:
             frame: Input frame (BGR format)

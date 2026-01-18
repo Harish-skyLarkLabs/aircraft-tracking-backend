@@ -173,6 +173,8 @@ class CameraViewSet(viewsets.ModelViewSet):
                     ptz_preset_number=camera.ptz_preset_number,
                     enable_ptz_tracking=camera.ptz_tracking_enabled,
                     enable_zoom_control=camera.ptz_zoom_enabled,
+                    enable_zoom_in=camera.ptz_zoom_in_enabled,
+                    enable_zoom_out=camera.ptz_zoom_out_enabled,
                 )
                 if success:
                     camera.ai_enabled = True
@@ -220,6 +222,9 @@ class CameraViewSet(viewsets.ModelViewSet):
                 ptz_preset_number=camera.ptz_preset_number,
                 enable_ptz_tracking=camera.ptz_tracking_enabled,
                 enable_zoom_control=camera.ptz_zoom_enabled,
+                enable_zoom_in=camera.ptz_zoom_in_enabled,
+                enable_zoom_out=camera.ptz_zoom_out_enabled,
+                # ptz_zoom_config=camera.ptz_zoom_config or camera.get_default_zoom_config(),
             )
             
             if success:

@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple, Callable, Set
 from datetime import datetime
 
 from .aircraft_detector import get_detector
-from .tracker import AircraftTracker, IOUTracker
+from .tracker import AircraftTracker
 from .video_recorder import get_video_recorder
 from .drawing_utils import draw_polygon_roi
 from .ptz_controller import PTZController, get_ptz_controller
